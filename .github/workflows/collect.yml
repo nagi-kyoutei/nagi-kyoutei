@@ -2,7 +2,7 @@ name: ナギちゃん自動集計
 
 on:
   schedule:
-    - cron: '0 14 * * *'   # UTC 14:00 = 日本時間23:00
+    - cron: '30 13 * * *'  # UTC 13:30 = 日本時間22:30
   workflow_dispatch: {}     # Actionsタブから手動実行もできるようにする
 
 permissions:
