@@ -1,0 +1,25 @@
+name: ナギちゃん自動集計
+
+on:
+  schedule:
+    - cron: '0 14 * * *'   # UTC 14:00 = 日本時間23:00
+  workflow_dispatch: {}     # Actionsタブから手動実行もできるようにする
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 海水場データを集計する
+        run: node scripts/collect.js
+      - name: 結果をリポジトリに保存する
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "🦀 自動集計データ更新"
+          file_pattern: data/*.json
