@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#2b6cb0">
+<title>ナギちゃん競艇予想</title>
+<style>
+  :root{
+    --bg:#0f1623; --card:#1b2435; --card2:#222d42; --line:#33405c;
+    --txt:#e8edf6; --sub:#9fb0cc; --accent:#3b82f6; --accent2:#22d3ee;
+    --good:#34d399; --warn:#fbbf24; --bad:#f87171;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+    background:var(--bg); color:var(--txt); padding:0 14px 60px; max-width:520px; margin:0 auto;}
+  header{position:sticky; top:0; background:linear-gradient(180deg,var(--bg) 78%,transparent);
+    padding:16px 0 10px; z-index:10;}
+  h1{font-size:20px; margin:0; display:flex; align-items:center; gap:8px;}
+  h1 .logo{font-size:24px;}
+  .tag{font-size:11px; color:var(--sub); margin-top:2px;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin:12px 0;}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  label{font-size:11px; color:var(--sub); display:block; margin-bottom:3px;}
+  input,select{width:100%; padding:11px 10px; background:var(--card2); border:1px solid var(--line);
+    border-radius:9px; color:var(--txt); font-size:15px;}
+  input:focus,select:focus{outline:none; border-color:var(--accent);}
+  .full{grid-column:1/3;}
+  .btn{width:100%; padding:15px; background:linear-gradient(135deg,var(--accent),var(--accent2));
+    color:#04111f; border:none; border-radius:12px; font-size:16px; font-weight:800; margin-top:8px; font-family:inherit;}
+  .btn:active{transform:scale(.98);}
+  .btn:disabled{opacity:.5;}
+  .btn-sub{background:var(--card2); color:var(--sub); border:1px solid var(--line); font-weight:600; font-size:14px; padding:12px;}
+  .row2{display:flex; gap:8px;}
+  .row2>*{flex:1;}
+  .status{font-size:12px; color:var(--sub); margin-top:8px; line-height:1.5; min-height:16px;}
+  .status.err{color:var(--bad);}
+  .status.ok{color:var(--good);}
+  .bnum{width:22px; height:22px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:12px; color:#0a0f1a; vertical-align:middle; margin-right:6px;}
+  .c1{background:#ffffff;} .c2{background:#1c1c1c; color:#fff;} .c3{background:#e23b3b; color:#fff;}
+  .c4{background:#3b82f6; color:#fff;} .c5{background:#f5c542;} .c6{background:#34d399;}
+  /* レース情報バー */
+  .raceinfo{display:flex; flex-wrap:wrap; gap:6px 12px; font-size:12px; color:var(--sub); margin-top:4px;}
+  .raceinfo b{color:var(--txt);}
+  /* 結果 */
+  .sec-title{font-size:13px; color:var(--sub); margin:18px 0 4px; font-weight:700;}
+  .res-row{display:flex; align-items:flex-start; gap:10px; padding:12px; border-radius:12px;
+    background:var(--card2); margin:8px 0; border:1px solid var(--line);}
+  .rank{font-size:22px; width:28px; text-align:center; flex:0 0 auto; padding-top:2px;}
+  .res-main{flex:1; min-width:0;}
+  .res-name{font-weight:700; font-size:15px;}
+  .res-score{font-size:12px; color:var(--sub);}
+  .bar{height:6px; border-radius:4px; background:#0c1322; margin-top:6px; overflow:hidden;}
+  .bar>span{display:block; height:100%; background:linear-gradient(90deg,var(--accent),var(--accent2));}
+  .reason{font-size:13px; line-height:1.6; color:var(--txt); margin-top:6px;}
+  .chips{display:flex; flex-wrap:wrap; gap:5px; margin-top:7px;}
+  .chip{font-size:11px; padding:3px 8px; border-radius:20px; background:#0c1322; color:var(--sub); border:1px solid var(--line);}
+  .chip.good{color:var(--good); border-color:#1f5b46;}
+  .chip.warn{color:var(--warn); border-color:#5b4a1f;}
+  .chip.bad{color:var(--bad); border-color:#5b2a2a;}
+  .pick{background:linear-gradient(135deg,#243b5c,#1b2435); border:1px solid var(--accent);}
+  .verdict{font-size:14px; line-height:1.7;}
+  .verdict b{color:var(--accent2);}
+  .muted{color:var(--sub); font-size:12px; line-height:1.7;}
+  details{margin-top:10px;}
+  summary{font-size:13px; color:var(--sub); cursor:pointer; padding:4px 0;}
+  .foot{text-align:center; font-size:11px; color:var(--sub); margin-top:24px; line-height:1.6;}
+  .recorded{background:#13351f !important; color:var(--good) !important; border-color:#1f5b46 !important;}
+  @keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.06)}100%{transform:scale(1)}}
+  .pop{animation:pop .35s ease;}
+  #toast{position:fixed; left:50%; bottom:32px; transform:translateX(-50%) translateY(20px);
+    background:linear-gradient(135deg,#1f5b46,#13351f); color:#eafff4; border:1px solid #2ea878;
+    padding:13px 20px; border-radius:30px; font-size:14px; font-weight:700; z-index:100;
+    opacity:0; pointer-events:none; transition:opacity .25s, transform .25s; box-shadow:0 8px 24px rgba(0,0,0,.4);}
+  #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .anatbl{width:100%; border-collapse:collapse; font-size:12px;}
+  .anatbl th{color:var(--sub); font-weight:600; padding:5px 6px; border-bottom:1px solid var(--line); text-align:left; white-space:nowrap;}
+  .anatbl td{padding:6px; border-bottom:1px solid var(--line); white-space:nowrap;}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="logo">🦀</span>ナギちゃん競艇予想</h1>
+  <div class="tag">公式データ自動で取ってきて、潮とデータで艇を採点したるで🦀</div>
+</header>
+
+<!-- 自動取得 -->
+<div class="card">
+  <button class="btn" id="loadBtn" onclick="loadToday()">① 本日のレースを取得 📡</button>
+  <div class="grid" id="pickArea" style="margin-top:10px; display:none">
+    <div class="full" style="margin-bottom:2px"><label>② 競艇場とレースを選ぶ</label></div>
+    <div>
+      <select id="stadiumSel" onchange="onStadiumChange()"></select>
+    </div>
+    <div>
+      <select id="raceSel"></select>
+    </div>
+    <div class="full">
+      <button class="btn" onclick="runAuto()">③ このレースを予想する 🎯</button>
+      <div class="muted" style="margin-top:6px;text-align:center">押すたびに最新の展示・ST・潮も自動で取り直すで🦀</div>
+    </div>
+  </div>
+  <div class="status" id="status"></div>
+</div>
+
+<div id="toast"></div>
+
+<div id="result"></div>
+
+<!-- 成績ログ -->
+<div id="logArea"></div>
+
+<!-- 手入力（フォールバック） -->
+<details>
+  <summary>✍️ 手入力で予想する（データが無い時用）</summary>
+  <div id="manualArea"></div>
+  <button class="btn" onclick="runManual()">手入力で予想する 🎯</button>
+  <button class="btn btn-sub" onclick="loadSample()">サンプルを入れる</button>
+</details>
+
+<div class="foot">
+  ※ 参考用やで。舟券は自己責任で頼むわ🦀　データ提供：Boatrace Open API<br>
+  海水場17場は潮の満ち引きで評価を補正する凪仕様　採点モデル v2（2026-07-07 展示・ST強化）
+</div>
+
+<script>
+/* ===== マスタ ===== */
+const SNAME=["","桐生","戸田","江戸川","平和島","多摩川","浜名湖","蒲郡","常滑","津","三国","びわこ","住之江","尼崎","鳴門","丸亀","児島","宮島","徳山","下関","若松","芦屋","福岡","唐津","大村"];
+const CLASS_NUM={1:"A1",2:"A2",3:"B1",4:"B2"};
+const CLASS_PT={"A1":100,"A2":72,"B1":45,"B2":25};
+const WEATHER={1:"晴",2:"曇",3:"雨",4:"雪",5:"霧",6:"風"};
+const COURSE_NAME=["","1コース(イン)","2コース","3コース","4コース","5コース","6コース(大外)"];
+const COURSE_BASE=[0,100,62,50,44,32,22];
+// 忖度補正(田中理論)スイッチ。田中の判断で停止中(2026-06-22 宮島1Rで同期ダブルボス+12が裏目→1-2-3取りこぼし)。
+// trueにすれば「よっぽどの時だけ」ロジックに改修して復活させる想定。
+const SONTAKU_ON=false;
+// 採点モデルのバージョン。記録に残して「どのモデルの予想か」を後から比較できるようにする。
+// v1=初期(コース24%重視) → v2=2026-07-07バックテスト最適化(展示28%/ST20%強化、8日858Rで回収77%→109%)
+const MODEL_VER='v2';
+
+const PROGRAMS_URL="https://boatraceopenapi.github.io/programs/v2/today.json";
+const PREVIEWS_URL="https://boatraceopenapi.github.io/previews/v2/today.json";
+
+// 海水場の潮位地点（tide736.net）。満ち=イン有利／引き=センター・まくり有利
+// pc=都道府県コード, hc=港コード。まず宮島(厳島)から。確認でき次第ほかの海水場も追加。
+const TIDE_HARBOR={
+  3:{pc:13,hc:3,name:'羽田(東京湾)'},   // 江戸川(汽水)
+  4:{pc:13,hc:3,name:'羽田(東京湾)'},   // 平和島
+  6:{pc:22,hc:18,name:'舞阪'},          // 浜名湖
+  7:{pc:23,hc:9,name:'蒲郡'},           // 蒲郡
+  8:{pc:23,hc:15,name:'常滑'},          // 常滑
+  9:{pc:24,hc:2,name:'津'},             // 津
+  13:{pc:28,hc:6,name:'尼崎'},          // 尼崎
+  14:{pc:36,hc:5,name:'土佐泊(鳴門)'},  // 鳴門
+  15:{pc:37,hc:10,name:'丸亀'},         // 丸亀
+  16:{pc:33,hc:7,name:'下津井(児島)'},  // 児島
+  17:{pc:34,hc:23,name:'厳島'},         // 宮島
+  18:{pc:35,hc:10,name:'徳山'},         // 徳山
+  19:{pc:35,hc:19,name:'下関'},         // 下関
+  20:{pc:40,hc:10,name:'若松'},         // 若松
+  21:{pc:40,hc:26,name:'脇田(芦屋)'},   // 芦屋
+  22:{pc:40,hc:21,name:'福岡'},         // 福岡
+  23:{pc:41,hc:1,name:'唐津'},          // 唐津
+  // 24:大村は大村湾の潮位観測点を要追加調査
+};
+const TIDE_BASE="https://tide736.net/api/get_tide.php";
+
+function hhmmToMin(s){ const m=/(\d{1,2}):(\d{2})/.exec(s||''); return m?(+m[1]*60+ +m[2]):null; }
+
+async function fetchTide(sid,date,closedAt){
+  const hb=TIDE_HARBOR[sid]; if(!hb) return null;
+  const [y,mo,d]=date.split('-').map(Number);
+  const url=`${TIDE_BASE}?pc=${hb.pc}&hc=${hb.hc}&yr=${y}&mn=${mo}&dy=${d}&rg=day`;
+  try{
+    const j=await fetch(url).then(r=>r.json());
+    const day=j.tide&&j.tide.chart&&j.tide.chart[date];
+    const arr=day&&day.tide; if(!arr||!arr.length) return null;
+    const raceMin=hhmmToMin(closedAt&&closedAt.slice(11)) ?? 12*60;
+    // レース時刻に最も近いサンプルと、約60分前のサンプル
+    let now=arr[0],prev=arr[0],bestN=1e9,bestP=1e9;
+    arr.forEach(s=>{
+      const t=hhmmToMin(s.time); if(t==null) return;
+      if(Math.abs(t-raceMin)<bestN){bestN=Math.abs(t-raceMin);now=s;}
+      if(Math.abs(t-(raceMin-60))<bestP){bestP=Math.abs(t-(raceMin-60));prev=s;}
+    });
+    const slope=(+now.cm)-(+prev.cm);  // 約1時間あたりの潮位変化(cm)
+    const trend = slope>=15?'満ち(上げ)' : slope<=-15?'引き(下げ)' : '横ばい';
+    return {harbor:hb.name, slope, cm:Math.round(+now.cm), trend, label:`${trend} ${Math.round(+now.cm)}cm`};
+  }catch(e){ console.error('tide',e); return null; }
+}
+
+let PROGRAMS=[], PREVIEWS=[];
+
+/* ===== ユーティリティ ===== */
+const $=id=>document.getElementById(id);
+function setStatus(msg,cls){ const s=$('status'); s.textContent=msg; s.className='status'+(cls?' '+cls:''); }
+function boatsToArray(boats){ return Array.isArray(boats)?boats:Object.values(boats||{}); }
+// programs/previews APIが新形式{today:{...}}でも旧形式{programs:[...]}でも読めるようにする
+function unwrapToday(json,key){ return (json.today&&json.today[key])||json[key]||[]; }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+
+/* ===== データ取得 ===== */
+async function loadToday(){
+  $('loadBtn').disabled=true;
+  setStatus('取ってくるわ、ちょい待ってや…');
+  try{
+    const [pg,pv]=await Promise.all([
+      fetch(PROGRAMS_URL).then(r=>r.json()),
+      fetch(PREVIEWS_URL).then(r=>r.json()).catch(()=>({previews:[]}))
+    ]);
+    // 2026-07-12: boatraceopenapiのprograms APIが {programs:[...]} から {today:{programs:[...]},yesterday:{...}} に変更された。新旧どちらでも動くようにする。
+    PROGRAMS=unwrapToday(pg,'programs');
+    PREVIEWS=unwrapToday(pv,'previews');
+    if(!PROGRAMS.length){ setStatus('本日の出走表が見つからんかったわ。手入力使ってや。','err'); $('loadBtn').disabled=false; return; }
+    buildStadiumSelect();
+    $('pickArea').style.display='grid';
+    setStatus('取れたで！場とレース選んで予想したろか。'+(PREVIEWS.length?'':'（直前情報はまだ出てへんわ）'),'ok');
+  }catch(e){
+    setStatus('取得しくじったわ：'+e.message+' / ネット繋がっとるか見てや。','err');
+  }
+  $('loadBtn').disabled=false;
+}
+
+function buildStadiumSelect(){
+  const ids=[...new Set(PROGRAMS.map(p=>p.race_stadium_number))].sort((a,b)=>a-b);
+  $('stadiumSel').innerHTML=ids.map(id=>`<option value="${id}">${SNAME[id]||('場'+id)}</option>`).join('');
+  onStadiumChange();
+}
+function onStadiumChange(){
+  const sid=+$('stadiumSel').value;
+  const races=PROGRAMS.filter(p=>p.race_stadium_number===sid).map(p=>p.race_number).sort((a,b)=>a-b);
+  $('raceSel').innerHTML=races.map(r=>`<option value="${r}">${r}R</option>`).join('');
+}
+
+async function refreshPreview(){
+  setStatus('直前情報、取り直しとるわ…');
+  try{
+    const pv=await fetch(PREVIEWS_URL+'?t='+Date.now()).then(r=>r.json());
+    PREVIEWS=unwrapToday(pv,'previews');
+    setStatus('直前情報、更新したで（'+new Date().toLocaleTimeString('ja-JP')+'）','ok');
+    if($('result').dataset.active) runAuto();
+  }catch(e){ setStatus('更新しくじったわ：'+e.message,'err'); }
+}
+
+/* ===== 自動予想 ===== */
+async function runAuto(){
+  const sid=+$('stadiumSel').value, rno=+$('raceSel').value;
+  // 予想のたびに最新の直前情報(展示・ST)を取り直す
+  setStatus('最新の直前情報を取ってくるわ…');
+  try{ const pv=await fetch(PREVIEWS_URL+'?t='+Date.now()).then(r=>r.json()); PREVIEWS=unwrapToday(pv,'previews'); }catch(e){}
+  const prog=PROGRAMS.find(p=>p.race_stadium_number===sid && p.race_number===rno);
+  if(!prog){ setStatus('そのレース見当たらんわ。','err'); return; }
+  const prev=PREVIEWS.find(p=>p.race_stadium_number===sid && p.race_number===rno);
+
+  const pgBoats=boatsToArray(prog.boats);
+  const pvBoats=prev?boatsToArray(prev.boats):[];
+  const pvByNo={}; pvBoats.forEach(b=>pvByNo[b.racer_boat_number]=b);
+
+  const boats=pgBoats.map(b=>{
+    const pv=pvByNo[b.racer_boat_number]||{};
+    return {
+      no:b.racer_boat_number,
+      name:b.racer_name||('?'+b.racer_boat_number),
+      cls:CLASS_NUM[b.racer_class_number]||'B1',
+      ki:b.racer_branch_number??null,
+      local2:b.racer_local_top_2_percent??0,
+      national2:b.racer_national_top_2_percent??0,
+      motor2:b.racer_assigned_motor_top_2_percent??0,
+      flying:b.racer_flying_count??0,
+      avgST:b.racer_average_start_timing??null,
+      // 直前情報
+      course:pv.racer_course_number||b.racer_boat_number,
+      exTime:pv.racer_exhibition_time??null,
+      st:pv.racer_start_timing??null,
+      tilt:pv.racer_tilt_adjustment??null,
+      weight:pv.racer_weight??null,
+    };
+  });
+
+  const race={
+    title:prog.race_title||'', sub:prog.race_subtitle||'',
+    closed:prog.race_closed_at||'',
+    date:prog.race_date||new Date().toISOString().slice(0,10), sid,
+    stadium:SNAME[sid]||('場'+sid), rno,
+    wind:prev?prev.race_wind:prog.race_wind,
+    windDir:prev?prev.race_wind_direction_number:null,
+    wave:prev?prev.race_wave:null,
+    weather:prev?prev.race_weather_number:prog.race_weather_number,
+    hasPreview:!!prev && pvBoats.some(b=>b.racer_exhibition_time),
+  };
+
+  // 潮位（海水場のみ）
+  if(TIDE_HARBOR[sid]){ setStatus('潮、見てくるわ…'); race.tide=await fetchTide(sid,race.date,race.closed); }
+
+  const ranked=scoreBoats(boats,race);
+  render(ranked,race);
+  $('result').dataset.active='1';
+  // 最後に必ず「取得時刻」を出す（更新したのが分かるように）
+  const now=new Date().toLocaleTimeString('ja-JP');
+  let msg='予想を更新したで（'+now+'）';
+  if(race.tide) msg+=' / 🌊'+race.tide.label;
+  else if(TIDE_HARBOR[sid]) msg+=' / 潮位は取れんかったわ（CORS等）';
+  setStatus(msg,'ok');
+}
+
+/* ===== 採点ロジック（カニ理論込み） ===== */
+function scoreBoats(boats,race){
+  // 忖度の基準：このレースで一番期が小さい(ベテラン)=ボス
+  const kis=boats.map(b=>b.ki).filter(v=>v!==null && v!==undefined);
+  const bossKi=kis.length?Math.min(...kis):null;
+  const strongWind=race.wind!=null && race.wind>=5;
+
+  boats.forEach(b=>{
+    const chips=[]; b.sontakuTxt='';
+
+    // 1. コース（進入優先）
+    const courseScore=COURSE_BASE[b.course]||30;
+    if(b.course===1) chips.push(['1コースは最強枠','good']);
+    else if(b.course>=5) chips.push(['外枠で不利','bad']);
+    if(b.course!==b.no) chips.push(['進入'+b.course+'コースに変化','warn']);
+
+    // 2. 級別
+    const clsScore=CLASS_PT[b.cls]??45;
+    if(b.cls==='A1') chips.push(['A1級','good']);
+    else if(b.cls==='B2') chips.push(['B2級は格下','bad']);
+
+    // 3. 当地2連率（%そのまま）
+    const localScore=clamp(b.local2,0,100);
+    if(b.local2>=45) chips.push(['当地2連率'+b.local2.toFixed(0)+'%','good']);
+    else if(b.local2>0 && b.local2<25) chips.push(['当地不振'+b.local2.toFixed(0)+'%','warn']);
+
+    // 4. モーター2連率（%）
+    const motorScore=clamp(b.motor2,0,100);
+    if(b.motor2>=45) chips.push(['モーター好調'+b.motor2.toFixed(0)+'%','good']);
+    else if(b.motor2>0 && b.motor2<32) chips.push(['モーター不調'+b.motor2.toFixed(0)+'%','warn']);
+
+    // 5. 展示タイム（小さいほど速い。6.60速い〜6.95遅い目安）
+    let exScore=50;
+    if(b.exTime){ exScore=clamp((6.95-b.exTime)/(6.95-6.60)*100,0,100);
+      if(b.exTime<=6.70) chips.push(['展示'+b.exTime+'で伸び良好','good']);
+      else if(b.exTime>=6.85) chips.push(['展示'+b.exTime+'は重い','warn']); }
+
+    // 6. ST（直前ST優先→平均ST。小さいほど良い。0.05速い〜0.20遅い）
+    let stScore=50; const stVal=(b.st!=null?b.st:b.avgST);
+    if(stVal!=null){ stScore=clamp((0.20-stVal)/(0.20-0.05)*100,0,100);
+      if(stVal<=0.13) chips.push(['ST'+stVal.toFixed(2)+'と速い','good']);
+      else if(stVal>=0.18) chips.push(['ST'+stVal.toFixed(2)+'は遅め','warn']); }
+    // フライング持ちはスタート慎重になりがち→減点＆注意
+    if(b.flying>0){ stScore=Math.max(0,stScore-15); chips.push(['F'+b.flying+'本持ちで慎重','warn']); }
+
+    // 7. チルト（攻め・伸び型）
+    if(b.tilt!=null && b.tilt>=0.5) chips.push(['チルト'+b.tilt+'で伸び勝負','good']);
+
+    // 8. 忖度補正（田中理論）※SONTAKU_ON=false の間は完全オフ（点数に影響させない）
+    let sontaku=0;
+    if(SONTAKU_ON && bossKi!=null && b.ki!=null){
+      if(b.ki===bossKi && kis.length>1){ sontaku=12; b.sontakuTxt='レース最古参のボス格。後輩が遠慮するぶん有利'; chips.push(['忖度される側👑','good']); }
+      else { const gap=b.ki-bossKi;
+        if(gap>=20){ sontaku=-8; b.sontakuTxt='ボスより'+gap+'期下。先輩に強く差しづらい'; chips.push(['後輩で遠慮','warn']); }
+        else if(gap>0){ sontaku=-3; } }
+    }
+
+    // 9. 気象補正（強風はイン信頼度を下げ、荒れ＝外も狙える）
+    let weather=0;
+    if(strongWind){ if(b.course<=2){ weather=-6; } else if(b.course>=4){ weather=6; } }
+
+    // 10. 潮補正（宮島など海水場。満ち=イン有利／引き=センター・まくり有利）
+    let tideAdj=0;
+    if(race.tide && race.tide.slope!=null){
+      const mag=clamp(race.tide.slope/60,-1,1)*8;   // 満ち=+, 引き=-
+      tideAdj = (b.course<=2) ? mag : -mag*0.8;       // イン勢は満ちで＋／センター外勢は引きで＋
+      if(race.tide.slope<=-15){ if(b.course>=3) chips.push(['引き潮で攻め有利','good']); else chips.push(['引き潮はイン不利','warn']); }
+      else if(race.tide.slope>=15){ if(b.course<=2) chips.push(['満ち潮でイン有利','good']); else if(b.course>=4) chips.push(['満ち潮は外不利','warn']); }
+    }
+
+    // 重み付け合計 ★バックテスト最適化(2026-07-07, 8日858R): 展示・STを大幅強化＝回収率77%→109%(潮抜き検証)。
+    // 元の比率 co.22/cl.18/lo.16/mo.16/ex.28/st.20 を、合計0.94に正規化して潮補正のスケールを維持。
+    const raw = courseScore*0.172 + clsScore*0.141 + localScore*0.125 + motorScore*0.125
+              + exScore*0.219 + stScore*0.157 + sontaku + weather + tideAdj;
+    b.score=Math.max(1,raw);
+    b.chips=chips;
+  });
+
+  const max=Math.max(...boats.map(b=>b.score));
+  boats.forEach(b=> b.pct=Math.round(b.score/max*100));
+  return [...boats].sort((a,b)=>b.score-a.score);
+}
+
+/* ===== 買い目生成（堅い/荒れ判定） ===== */
+function perm3(firsts,seconds,thirds){
+  const out=[];
+  firsts.forEach(f=>seconds.forEach(s=>thirds.forEach(t=>{
+    if(f!==s && s!==t && f!==t){ const k=f+'-'+s+'-'+t; if(!out.includes(k)) out.push(k); }
+  })));
+  return out;
+}
+function makePicks(ranked){
+  const n=ranked.map(b=>b.no);
+  const A=n[0],B=n[1],C=n[2],D=n[3];
+  const gap12=ranked[0].pct-ranked[1].pct;   // 本命の抜け具合
+  const gap14=ranked[0].pct-ranked[3].pct;   // 上位4艇の広がり
+
+  const aOut=ranked[0].course>=4;   // 本命がアウト(4-6コース)
+  // 買い目は全パターン「上位3艇ボックス6点」で統一（頭固定は本命取りこぼしで全滅するので回避＝競艇セオリー）
+  const combos=perm3([A,B,C],[A,B,C],[A,B,C]);       // 上位3艇ボックス → 6点
+  // 判定バッジは「どれだけ堅いレースか」の目安として残す
+  let level,label;
+  if(!aOut && gap12>=12 && gap14>=22){ level='rock'; label='🔒 堅い'; }
+  else if(aOut || gap12<=4){ level='rough'; label=aOut?'🌊 アウト本命':'🌊 荒れ注意'; }
+  else { level='normal'; label='⚖️ 中穴'; }
+  return {level,label,combos};
+}
+
+/* ===== 描画 ===== */
+function buildReason(b){
+  const p=[];
+  p.push(COURSE_NAME[b.course]||(b.course+'コース'));
+  if(b.course===1) p.push('競艇はインの逃げが基本で最有利');
+  p.push('級別'+b.cls);
+  if(b.local2>0) p.push('当地2連率'+b.local2.toFixed(0)+'%');
+  if(b.motor2>0) p.push('モーター2連率'+b.motor2.toFixed(0)+'%');
+  if(b.exTime) p.push('展示'+b.exTime);
+  const stVal=(b.st!=null?b.st:b.avgST); if(stVal!=null) p.push('ST'+stVal.toFixed(2));
+  let txt=p.join('／')+'。';
+  if(b.sontakuTxt) txt+='【忖度】'+b.sontakuTxt+'。';
+  return txt;
+}
+
+function render(ranked,race){
+  const medal=['🥇','🥈','🥉','4','5','6'];
+  let html='';
+
+  // レース情報バー
+  if(race){
+    const wDir = race.windDir!=null ? '' : '';
+    html+=`<div class="card">
+      <div style="font-weight:700;font-size:15px">${race.stadium} ${race.rno}R ${race.sub||''}</div>
+      <div class="muted" style="margin-top:2px">${race.title||''}</div>
+      <div class="raceinfo">
+        ${race.closed?`<span>締切 <b>${race.closed.slice(11,16)}</b></span>`:''}
+        ${race.weather?`<span>天候 <b>${WEATHER[race.weather]||'-'}</b></span>`:''}
+        ${race.wind!=null?`<span>風 <b>${race.wind}m</b></span>`:''}
+        ${race.wave!=null?`<span>波 <b>${race.wave}cm</b></span>`:''}
+        ${race.tide?`<span>🌊潮 <b>${race.tide.label}</b></span>`:''}
+        <span>${race.hasPreview?('🟢 直前情報あり'+(race.manualEx?'(手入力)':'')):'⚪ 直前情報まだ'}</span>
+      </div>
+    </div>`;
+  }
+
+  html+='<div class="sec-title">予想結果</div>';
+  const h=ranked[0],t=ranked[1],a=ranked[2];
+  const pk=makePicks(ranked);
+  const cls={rock:'good',normal:'warn',rough:'bad'}[pk.level];
+  html+=`<div class="card pick"><div class="verdict">
+    本命 <b>${h.no}号艇 ${h.name}</b>／対抗 <b>${t.no}号艇 ${t.name}</b>／押さえ <b>${a.no}号艇 ${a.name}</b><br>
+    <div style="margin-top:8px"><span class="chip ${cls}">${pk.label}</span>
+      <span class="muted">3連単 ${pk.combos.length}点（${pk.combos.length*100}円）</span></div>
+    <div class="chips" style="margin-top:8px">
+      ${pk.combos.map(c=>`<span class="chip">${c}</span>`).join('')}
+    </div>
+    <button class="btn btn-sub" id="recBtn" style="margin-top:10px" onclick="recordBet()">📝 この買い目で投票を記録</button>
+    ${(race && !race.hasPreview)?`<button class="btn btn-sub" id="exBtn" style="margin-top:8px" onclick="showExInput()">✍️ 展示を手入力して🟢本物予想にする</button><div id="exInputArea"></div>`:''}
+  </div></div>`;
+  CURRENT={race,ranked,pk};
+
+  ranked.forEach((b,i)=>{
+    html+=`<div class="res-row ${i===0?'pick':''}">
+      <div class="rank">${medal[i]}</div>
+      <div class="res-main">
+        <div class="res-name"><span class="bnum c${b.no}">${b.no}</span>${b.name}</div>
+        <div class="res-score">評価スコア ${b.pct}</div>
+        <div class="bar"><span style="width:${b.pct}%"></span></div>
+        <div class="reason">${buildReason(b)}</div>
+        <div class="chips">${b.chips.map(c=>`<span class="chip ${c[1]}">${c[0]}</span>`).join('')}</div>
+      </div>
+    </div>`;
+  });
+
+  html+=`<details><summary>採点の仕組み</summary><div class="muted" style="margin-top:8px">
+    展示タイム28%・ST20%・コース22%・級別18%・当地2連率16%・モーター2連率16%を合計し、気象補正と潮補正を加減点（重みは2026-07-07にバックテスト最適化、展示とSTを強化）。
+    展示タイムとSTは予想のたびに取得した最新値を使用。F持ちは慎重スタート想定で減点。強風時はイン信頼度を下げ外を見直す。
+    ※忖度補正(田中理論)は現在オフ。同期ダブルボスで外枠を持ち上げすぎる裏目が出たため停止中。
+    宮島など海水場は潮補正あり：満ち潮はイン有利、引き潮はセンター・まくり有利として動的に評価を変える。
+  </div></details>`;
+
+  $('result').innerHTML=html;
+  // 既に記録済みならボタンを最初から記録済み表示に
+  if(race && race.sid && getLogs().some(l=>l.date===race.date&&l.sid===race.sid&&l.rno===race.rno)){
+    const b=$('recBtn'); if(b){ b.textContent='✅ 記録済み'; b.classList.add('recorded'); b.disabled=true; }
+  }
+  $('result').scrollIntoView({behavior:'smooth'});
+}
+
+/* ===== 展示クイック入力（直前情報がAPIに来てない時、公式サイトを見て手入力→🟢本物予想にする） ===== */
+function showExInput(){
+  if(!CURRENT||!CURRENT.ranked){ toast('先に予想を出してな'); return; }
+  const boats=[...CURRENT.ranked].sort((a,b)=>a.no-b.no);
+  let h=`<div class="card" style="border-color:var(--accent2);margin-top:10px">
+    <div class="muted" style="margin-bottom:8px">公式サイトの「直前情報・スタート展示」を見て入れてな🦀　進入は枠なりなら触らんでOK。スタート展示がF(フライング)の艇は、STは今節平均STを入れとくのが無難や。</div>
+    <div style="display:flex;gap:6px;font-size:10px;color:var(--sub);margin-bottom:2px"><span style="width:26px"></span><span style="width:64px"></span><span style="flex:1">展示タイム</span><span style="flex:1">ST</span><span style="width:52px">進入</span></div>`;
+  boats.forEach(b=>{
+    h+=`<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+      <span class="bnum c${b.no}">${b.no}</span><span style="width:64px;font-size:13px;overflow:hidden;white-space:nowrap">${b.name}</span>
+      <input id="ex_t${b.no}" type="number" inputmode="decimal" step="0.01" placeholder="6.70" value="${(b.exTime!=null&&b.exTime>0)?b.exTime:''}" style="flex:1">
+      <input id="ex_s${b.no}" type="number" inputmode="decimal" step="0.01" placeholder="0.15" value="${b.st!=null?b.st:''}" style="flex:1">
+      <input id="ex_c${b.no}" type="number" inputmode="numeric" placeholder="${b.no}" value="${b.course||b.no}" style="width:52px">
+    </div>`;
+  });
+  h+=`<button class="btn" onclick="applyExInput()">この展示で🟢本物予想に再計算 🎯</button></div>`;
+  $('exInputArea').innerHTML=h;
+  $('exInputArea').scrollIntoView({behavior:'smooth'});
+}
+function applyExInput(){
+  if(!CURRENT||!CURRENT.race){ toast('先に予想を出してな'); return; }
+  const race=CURRENT.race;
+  const boats=[...CURRENT.ranked].sort((a,b)=>a.no-b.no).map(b=>{
+    const t=parseFloat($('ex_t'+b.no).value), s=parseFloat($('ex_s'+b.no).value), c=parseInt($('ex_c'+b.no).value,10);
+    return {...b, exTime:isNaN(t)?null:t, st:isNaN(s)?null:s, course:isNaN(c)?b.no:c};
+  });
+  race.hasPreview=true; race.manualEx=true;   // 手入力でも展示込み＝🟢本物予想あつかい
+  const re=scoreBoats(boats,race);
+  render(re,race);
+  toast('展示入れて🟢本物予想にしたで！記録もできるで🦀');
+}
+
+/* ===== 成績ログ ===== */
+let CURRENT=null;
+const LOG_KEY='kuroko_logs';
+const RESULTS_URL=d=>`https://boatraceopenapi.github.io/results/v3/${d.slice(0,4)}/${d.replace(/-/g,'')}.json`;
+
+let toastTimer=null;
+function toast(msg){
+  const t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),2200);
+}
+function markRecorded(){
+  const b=$('recBtn'); if(!b) return;
+  b.textContent='✅ 記録済み'; b.classList.add('recorded','pop'); b.disabled=true;
+  setTimeout(()=>b.classList.remove('pop'),400);
+}
+let memStore={};
+let logFilter='ALL';
+function setLogFilter(v){ logFilter=v; renderLogs(); }
+const LS_OK=(()=>{ try{ localStorage.setItem('_t','1'); localStorage.removeItem('_t'); return true; }catch(e){ return false; } })();
+function getLogs(){ if(LS_OK){ try{ return JSON.parse(localStorage.getItem(LOG_KEY))||[]; }catch(e){} } return memStore[LOG_KEY]||[]; }
+// 記録が変わったら「未バックアップ」フラグを立てる(バックアップ保存で消える)。消失事故防止。
+function saveLogs(l){ try{ localStorage.setItem('kuroko_dirty','1'); }catch(e){} if(LS_OK){ try{ localStorage.setItem(LOG_KEY,JSON.stringify(l)); return; }catch(e){} } memStore[LOG_KEY]=l; }
+function isDirty(){ try{ return !!localStorage.getItem('kuroko_dirty'); }catch(e){ return false; } }
+
+function recordBet(){
+ try{
+  if(!CURRENT){ toast('⚠️ 先に「このレースを予想」してな'); return; }
+  const {race,ranked,pk}=CURRENT;
+  const date=(race&&race.date)||new Date().toISOString().slice(0,10);
+  const sid=(race&&race.sid)||0, rno=(race&&race.rno)||0;
+  const stadium=(race&&race.stadium)||'手入力';
+  const logs=getLogs();
+  if(sid && logs.some(l=>l.date===date&&l.sid===sid&&l.rno===rno)){
+    markRecorded(); toast('このレースは記録済みやで🦀'); try{renderLogs();}catch(e){console.error(e);} return;
+  }
+  logs.unshift({
+    id:Date.now(), date, sid, rno, stadium,
+    model:MODEL_VER,   // どの採点モデルの予想か(新旧モデルの成績比較用)
+    level:pk.level, label:pk.label, combos:pk.combos,
+    top3:[ranked[0].no,ranked[1].no,ranked[2].no],
+    invest:pk.combos.length*100,
+    hasPreview:(race&&race.hasPreview)||false,   // 展示・ST込みの本物の予想か
+    snapshot:ranked.map(b=>({
+      no:b.no, name:b.name, course:b.course, cls:b.cls, pct:b.pct,
+      exTime:b.exTime, st:(b.st!=null?b.st:b.avgST), motor2:b.motor2, local2:b.local2, ki:b.ki
+    })),
+    result:null, hit:null, payoff:null
+  });
+  saveLogs(logs);
+  markRecorded();
+  toast('✅ 投票を記録したで！🦀');
+  try{renderLogs();}catch(e){console.error(e);}
+ }catch(err){ toast('⚠️記録エラー: '+err.message); console.error(err); }
+}
+
+function delLog(id){ saveLogs(getLogs().filter(l=>l.id!==id)); renderLogs(); }
+function clearLogs(){ if(confirm('成績ログを全部消す？')){ saveLogs([]); renderLogs(); } }
+
+function exportLogs(){
+  const blob=new Blob([JSON.stringify(getLogs())],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='nagi_logs_'+new Date().toISOString().slice(0,10)+'.json';
+  a.click(); URL.revokeObjectURL(a.href);
+  try{ localStorage.removeItem('kuroko_dirty'); }catch(e){}
+  toast('バックアップ保存したで🦀');
+  renderLogs();
+}
+function importLogs(file){
+  if(!file) return;
+  const r=new FileReader();
+  r.onload=e=>{ try{ const arr=JSON.parse(e.target.result);
+    if(Array.isArray(arr)){ saveLogs(arr); renderLogs(); toast('読み込んだで🦀'); }
+    else toast('ファイル形式がおかしいわ'); }
+    catch(err){ toast('読み込み失敗:'+err.message); } };
+  r.readAsText(file);
+}
+
+async function checkResults(){
+  const logs=getLogs();
+  const pending=logs.filter(l=>l.hit===null && l.sid);
+  if(!pending.length){ setStatus('照合する未確定レースが無いで','warn'); return; }
+  setStatus('結果、照合しとるわ…');
+  const dates=[...new Set(pending.map(l=>l.date))];
+  const byDate={};
+  await Promise.all(dates.map(async d=>{
+    try{ const j=await fetch(RESULTS_URL(d)+'?t='+Date.now()).then(r=>r.json()); byDate[d]=j.results||[]; }
+    catch(e){ byDate[d]=null; }
+  }));
+  let done=0,stillPending=0;
+  logs.forEach(l=>{
+    if(l.hit!==null||!l.sid) return;
+    const races=byDate[l.date];
+    if(!races){ stillPending++; return; }
+    const r=races.find(x=>x.stadium_number===l.sid && x.number===l.rno);
+    if(!r||!r.boats){ stillPending++; return; }
+    const placed={}; r.boats.forEach(b=>{ if(b.racer_place_number) placed[b.racer_place_number]=b.racer_boat_number; });
+    if(!placed[1]||!placed[2]||!placed[3]){ stillPending++; return; }
+    const actual=`${placed[1]}-${placed[2]}-${placed[3]}`;
+    l.result=actual;
+    l.hit=l.combos.includes(actual);
+    let amt=0;
+    if(l.hit && r.payouts && r.payouts.trifecta){
+      const t=r.payouts.trifecta.find(x=>x.combination===actual);
+      amt=t?t.amount:0;
+    }
+    l.payoff=l.hit?amt:0;
+    done++;
+  });
+  saveLogs(logs); renderLogs();
+  setStatus(`照合できたで：${done}件確定` + (stillPending?` / ${stillPending}件はまだ結果待ちや`:''),'ok');
+}
+
+function buildAnalysis(l){
+  if(!l.snapshot||!l.snapshot.length) return '<div class="muted">この記録には背景データが無いで（機能追加前の記録）</div>';
+  // 実着順マップ（上位3着のみ確定）
+  const place={};
+  if(l.result){ l.result.split('-').forEach((no,i)=>place[+no]=i+1); }
+  const snap=[...l.snapshot].sort((a,b)=>b.pct-a.pct);
+  let rows=snap.map((b,i)=>{
+    const predRank=i+1;
+    const act=place[b.no];                 // 実着（1-3 or undefined）
+    let mark='', cls='';
+    if(act){
+      if(act<=3 && predRank>3){ mark='⚠️取りこぼし'; cls='warn'; }      // 軽視したのに上位
+      else if(act<=3 && predRank<=3){ mark='✅読み的中'; cls='good'; }  // 予想通り上位
+    }else if(predRank<=3){ mark='❌期待ハズレ'; cls='bad'; }            // 本命視も着外
+    const actTxt = act? (act+'着') : '着外';
+    return `<tr>
+      <td>${predRank}位</td>
+      <td><span class="bnum c${b.no}">${b.no}</span></td>
+      <td style="text-align:right">${b.pct}</td>
+      <td style="text-align:right">${b.exTime||'-'}</td>
+      <td style="text-align:right">${b.st!=null?b.st.toFixed(2):'-'}</td>
+      <td style="text-align:right">${b.motor2?b.motor2.toFixed(0)+'%':'-'}</td>
+      <td><b>${actTxt}</b></td>
+      <td><span class="chip ${cls}" style="white-space:nowrap">${mark}</span></td>
+    </tr>`;
+  }).join('');
+  return `<div style="overflow-x:auto"><table class="anatbl">
+    <tr><th>予想</th><th>艇</th><th>ｽｺｱ</th><th>展示</th><th>ST</th><th>ﾓｰﾀｰ</th><th>実着</th><th>判定</th></tr>
+    ${rows}
+  </table></div>
+  ${l.result?`<div class="muted" style="margin-top:8px">決着 <b>${l.result}</b>／買い目 ${l.combos.join('・')}</div>`:'<div class="muted" style="margin-top:8px">まだ結果未照合。照合すると相違が見えるで</div>'}`;
+}
+
+function renderLogs(){
+  const logs=getLogs();
+  const warn = LS_OK ? '' :
+    `<div class="card" style="border-color:var(--bad)"><div class="muted" style="color:var(--warn)">⚠️ この開き方やと記録が保存されへん（リロードで消える）。「⬇️バックアップ保存」でファイルに残すか、下の案内通り実ファイルをブラウザで開いてな🦀</div></div>`;
+  if(!logs.length){
+    $('logArea').innerHTML=`<div class="sec-title">📊 成績ログ</div>${warn}
+      <div class="card"><div class="muted">まだ記録が無いで。予想したら「📝 この買い目で投票を記録」を押すとここに溜まる🦀</div>
+      <button class="btn btn-sub" style="margin-top:10px" onclick="document.getElementById('impFile').click()">⬆️ バックアップを読み込み</button>
+      <input type="file" id="impFile" accept="application/json" style="display:none" onchange="importLogs(this.files[0])"></div>`;
+    return;
+  }
+  // 場フィルタ
+  const stadiums=[...new Set(logs.map(l=>l.stadium))];
+  if(logFilter!=='ALL' && !stadiums.includes(logFilter)) logFilter='ALL';
+  const shown = logFilter==='ALL' ? logs : logs.filter(l=>l.stadium===logFilter);
+
+  // 集計は「直前情報あり＝本物のナギちゃん予想」だけで計算（歯抜け予想は除外）
+  const settledAll=shown.filter(l=>l.hit!==null);
+  const settled=settledAll.filter(l=>l.hasPreview);
+  const refOnly=settledAll.length-settled.length;   // 参考(歯抜け)で除外した数
+  const hits=settled.filter(l=>l.hit).length;
+  const invest=settled.reduce((s,l)=>s+l.invest,0);
+  const ret=settled.reduce((s,l)=>s+(l.payoff||0),0);
+  const roi=invest?Math.round(ret/invest*100):0;
+  const hitRate=settled.length?Math.round(hits/settled.length*100):0;
+
+  const filterSel=`<select onchange="setLogFilter(this.value)" style="margin-bottom:8px">
+    <option value="ALL"${logFilter==='ALL'?' selected':''}>全場（${logs.length}件）</option>
+    ${stadiums.map(s=>`<option value="${s}"${logFilter===s?' selected':''}>${s}だけ（${logs.filter(l=>l.stadium===s).length}件）</option>`).join('')}
+  </select>`;
+
+  const bakWarn = isDirty() ? `<div class="card" style="border-color:#5b4a1f"><div class="muted" style="color:var(--warn)">💾 前回のバックアップ保存から記録が変わっとるで。ブラウザ閉じる前に「⬇️バックアップ保存」しときや🦀</div></div>` : '';
+  let html=`<div class="sec-title">📊 成績ログ</div>${warn}${bakWarn}
+  <div class="card">
+    ${filterSel}
+    <div class="muted" style="margin-bottom:6px">🟢直前情報ありの本物の予想だけで集計しとるで${refOnly?`（参考の歯抜け予想 ${refOnly}件は除外）`:''}</div>
+    <div class="raceinfo" style="font-size:13px">
+      <span>記録 <b>${shown.length}件</b></span>
+      <span>本物の確定 <b>${settled.length}件</b></span>
+      <span>的中 <b>${hits}件（${hitRate}%）</b></span>
+      <span>投資 <b>${invest.toLocaleString()}円</b></span>
+      <span>払戻 <b>${ret.toLocaleString()}円</b></span>
+      <span>回収率 <b style="color:${roi>=100?'var(--good)':'var(--bad)'}">${roi}%</b></span>
+    </div>
+    <button class="btn btn-sub" style="margin-top:10px" onclick="checkResults()">🔍 結果を照合する</button>
+  </div>`;
+
+  shown.forEach(l=>{
+    let badge,bcls;
+    if(l.hit===null){ badge='結果待ち'; bcls=''; }
+    else if(l.hit){ badge='的中 +'+l.payoff.toLocaleString()+'円'; bcls='good'; }
+    else { badge='不的中'; bcls='bad'; }
+    html+=`<div class="res-row">
+      <div class="res-main">
+        <div class="res-name">${l.stadium} ${l.rno}R <span class="muted">${l.date}</span></div>
+        <div class="chips" style="margin-top:6px">
+          <span class="chip">${l.label}</span>
+          <span class="chip">3連単${l.combos.length}点</span>
+          <span class="chip ${l.hasPreview?'good':'warn'}">${l.hasPreview?'🟢直前あり':'⚪直前なし(参考)'}</span>
+          <span class="chip ${bcls}">${badge}</span>
+          ${l.result?`<span class="chip">結果 ${l.result}</span>`:''}
+        </div>
+      </div>
+      <div class="rank" style="font-size:13px"><span class="chip" onclick="delLog(${l.id})" style="cursor:pointer">✕</span></div>
+    </div>
+    <details style="margin:-4px 0 4px 4px"><summary>📋 予想と結果を分析</summary>
+      <div style="padding:8px 2px">${buildAnalysis(l)}</div>
+    </details>`;
+  });
+  html+=`<div class="row2" style="margin-top:8px">
+    <button class="btn btn-sub" onclick="exportLogs()">⬇️ バックアップ保存</button>
+    <button class="btn btn-sub" onclick="document.getElementById('impFile').click()">⬆️ 読み込み</button>
+  </div>
+  <input type="file" id="impFile" accept="application/json" style="display:none" onchange="importLogs(this.files[0])">
+  <button class="btn btn-sub" onclick="clearLogs()" style="margin-top:6px">ログを全消去</button>`;
+  $('logArea').innerHTML=html;
+}
+renderLogs();
+
+/* ===== 手入力フォールバック ===== */
+function manualArea(){
+  let h='';
+  for(let i=1;i<=6;i++){
+    h+=`<div class="card"><div style="font-weight:700;margin-bottom:8px"><span class="bnum c${i}">${i}</span>${i}号艇</div>
+    <div class="grid">
+      <div class="full"><label>選手名</label><input id="m_name${i}" placeholder="選手名" autocomplete="off"></div>
+      <div><label>級別</label><select id="m_class${i}"><option>A1</option><option>A2</option><option selected>B1</option><option>B2</option></select></div>
+      <div><label>期別(小=ベテラン)</label><input id="m_ki${i}" type="number" inputmode="numeric"></div>
+      <div><label>当地2連率%</label><input id="m_local${i}" type="number" inputmode="decimal"></div>
+      <div><label>モーター2連率%</label><input id="m_motor${i}" type="number" inputmode="decimal"></div>
+      <div><label>展示タイム</label><input id="m_ex${i}" type="number" inputmode="decimal" step="0.01" placeholder="6.70"></div>
+      <div><label>ST</label><input id="m_st${i}" type="number" inputmode="decimal" step="0.01" placeholder="0.15"></div>
+    </div></div>`;
+  }
+  $('manualArea').innerHTML=h;
+}
+manualArea();
+
+function mnum(id){ const v=parseFloat($(id).value); return isNaN(v)?null:v; }
+function runManual(){
+  const boats=[];
+  for(let i=1;i<=6;i++){
+    boats.push({
+      no:i, name:($('m_name'+i).value.trim()||(i+'号艇')),
+      cls:$('m_class'+i).value, ki:mnum('m_ki'+i),
+      local2:mnum('m_local'+i)??0, national2:0, motor2:mnum('m_motor'+i)??0,
+      flying:0, avgST:null, course:i,
+      exTime:mnum('m_ex'+i), st:mnum('m_st'+i), tilt:null, weight:null,
+    });
+  }
+  const ranked=scoreBoats(boats,{wind:null});
+  render(ranked,null);
+}
+function loadSample(){
+  const s=[['山田太郎','A1',98,52,48,'6.65','0.12'],['佐藤次郎','A2',112,38,41,'6.78','0.15'],
+    ['鈴木三郎','B1',105,30,38,'6.82','0.16'],['田中四郎','A2',130,34,44,'6.71','0.14'],
+    ['高橋五郎','B1',120,22,33,'6.88','0.18'],['渡辺六郎','B2',140,18,29,'6.92','0.20']];
+  s.forEach((d,i)=>{const j=i+1;
+    $('m_name'+j).value=d[0]; $('m_class'+j).value=d[1]; $('m_ki'+j).value=d[2];
+    $('m_local'+j).value=d[3]; $('m_motor'+j).value=d[4]; $('m_ex'+j).value=d[5]; $('m_st'+j).value=d[6];});
+}
+</script>
+</body>
+</html>
