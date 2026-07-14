@@ -12,8 +12,8 @@ const COURSE_BASE=[0,100,62,50,44,32,22];
 const SONTAKU_ON=false;
 const MODEL_VER='v2';
 
-const PROGRAMS_URL="https://boatraceopenapi.github.io/programs/v2/today.json";
-const PREVIEWS_URL="https://boatraceopenapi.github.io/previews/v2/today.json";
+// 2026-07-14: boatraceopenapiが出走表/直前情報/結果を1本にまとめた新API(v1)に移行。旧programs/v2・previews/v2は直前情報が空になる不具合が発生したため乗り換えた。
+const API_URL="https://boatraceopenapi.github.io/api/v1/today.json";
 const TIDE_BASE="https://tide736.net/api/get_tide.php";
 
 const TIDE_HARBOR={
@@ -39,7 +39,6 @@ const TIDE_HARBOR={
 
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 function boatsToArray(boats){ return Array.isArray(boats)?boats:Object.values(boats||{}); }
-function unwrapToday(json,key){ return (json.today&&json.today[key])||json[key]||[]; }
 function hhmmToMin(s){ const m=/(\d{1,2}):(\d{2})/.exec(s||''); return m?(+m[1]*60+ +m[2]):null; }
 
 // 15秒でタイムアウトさせる(夜間にtide736が遅い時、永遠に待たないため。2026-07-13の16分停滞の教訓)
@@ -147,77 +146,73 @@ function makePicks(ranked){
 
 async function main(){
   console.log('=== ナギちゃん 自動集計開始 ===');
-  const [pgRaw,pvRaw]=await Promise.all([
-    fetchJson(PROGRAMS_URL),
-    fetchJson(PREVIEWS_URL).catch(()=>({previews:[]}))
-  ]);
-  const PROGRAMS=unwrapToday(pgRaw,'programs');
-  const PREVIEWS=unwrapToday(pvRaw,'previews');
-  if(!PROGRAMS.length){ console.log('出走表が見つからんかった。終了。'); return; }
-
-  const date=PROGRAMS[0].race_date;
-  const yr=date.slice(0,4), ymd=date.replace(/-/g,'');
-  const resultsUrl=`https://boatraceopenapi.github.io/results/v3/${yr}/${ymd}.json`;
-  let rs;
-  try{ rs=await fetchJson(resultsUrl); }catch(e){ console.log('結果APIまだ無いみたい、終了。'); return; }
-  const results = rs.results || (rs.today && rs.today.results) || [];
-
-  const pvI={}; PREVIEWS.forEach(p=>pvI[p.race_stadium_number+'_'+p.race_number]=p);
-  const rsI={}; results.forEach(r=>rsI[r.stadium_number+'_'+r.number]=r);
+  const raw=await fetchJson(API_URL);
+  const stadiums=raw.programs&&raw.programs.stadiums;
+  if(!stadiums){ console.log('出走表が見つからんかった。終了。'); return; }
 
   const out=[];
   let aT=0,aH=0,aI=0,aR=0;
   const statBySt={};
+  let date=null;
 
-  for(const p of PROGRAMS){
-    const sid=p.race_stadium_number, rno=p.race_number;
+  for(const sidStr of Object.keys(stadiums)){
+    const sid=+sidStr;
     if(!TIDE_HARBOR[sid]) continue;
-    const rr=rsI[sid+'_'+rno]; if(!rr||!rr.boats) continue;
-    const pl={}; rr.boats.forEach(b=>{ if(b.racer_place_number) pl[b.racer_place_number]=b.racer_boat_number; });
-    if(!pl[1]||!pl[2]||!pl[3]) continue;
+    const races=stadiums[sidStr].races||{};
 
-    const prev=pvI[sid+'_'+rno];
-    const pvBoats=prev?boatsToArray(prev.boats):[];
-    const pvByNo={}; pvBoats.forEach(b=>pvByNo[b.racer_boat_number]=b);
-    const hasPreview=!!prev && pvBoats.some(b=>b.racer_exhibition_time);
+    for(const rnoStr of Object.keys(races)){
+      const rno=+rnoStr;
+      const race=races[rnoStr];
+      if(!date) date=race.date;
 
-    const boats=boatsToArray(p.boats).map(b=>{
-      const pv=pvByNo[b.racer_boat_number]||{};
-      return {
-        no:b.racer_boat_number, name:b.racer_name,
-        cls:CLASS_NUM[b.racer_class_number]||'B1', ki:b.racer_branch_number,
-        local2:b.racer_local_top_2_percent||0, national2:b.racer_national_top_2_percent||0,
-        motor2:b.racer_assigned_motor_top_2_percent||0, flying:b.racer_flying_count||0,
-        avgST:b.racer_average_start_timing,
-        course:(hasPreview&&pv.racer_course_number)||b.racer_boat_number,
-        exTime:(pv.racer_exhibition_time&&pv.racer_exhibition_time>0)?pv.racer_exhibition_time:null,
-        st:(hasPreview&&pv.racer_start_timing!=null)?pv.racer_start_timing:null,
-        tilt:pv.racer_tilt_adjustment
-      };
-    });
+      const result=race.result;
+      if(!result||!result.racers) continue;
+      const pl={}; boatsToArray(result.racers).forEach(b=>{ if(b.place_number) pl[b.place_number]=b.entry_number; });
+      if(!pl[1]||!pl[2]||!pl[3]) continue;
 
-    const tide=await fetchTide(sid,date,p.race_closed_at);
-    const race={sid,rno,date,hasPreview,wind:prev?prev.race_wind:p.race_wind,tide,closed:p.race_closed_at};
-    const ranked=scoreBoats(boats,race);
-    const pk=makePicks(ranked);
-    const result=`${pl[1]}-${pl[2]}-${pl[3]}`;
-    const hit=pk.combos.includes(result);
-    let payoff=0;
-    if(hit && rr.payouts && rr.payouts.trifecta){
-      const t=rr.payouts.trifecta.find(x=>x.combination===result);
-      payoff=t?t.amount:0;
+      const prev=race.preview;
+      const pvBoats=prev?boatsToArray(prev.racers):[];
+      const pvByNo={}; pvBoats.forEach(b=>pvByNo[b.entry_number]=b);
+      const hasPreview=!!prev && pvBoats.some(b=>b.exhibition_time!=null);
+
+      const boats=boatsToArray(race.racers).map(b=>{
+        const pv=pvByNo[b.entry_number]||{};
+        return {
+          no:b.entry_number, name:b.name,
+          cls:CLASS_NUM[b.rank_number]||'B1', ki:b.branch_number,
+          local2:b.local_top_2_percent||0, national2:b.national_top_2_percent||0,
+          motor2:b.motor_top_2_percent||0, flying:b.flying_count||0,
+          avgST:b.average_start_timing,
+          course:(hasPreview&&pv.course_number)||b.entry_number,
+          exTime:(pv.exhibition_time&&pv.exhibition_time>0)?pv.exhibition_time:null,
+          st:(hasPreview&&pv.start_timing!=null)?pv.start_timing:null,
+          tilt:pv.tilt_adjustment
+        };
+      });
+
+      const tide=await fetchTide(sid,race.date,race.closed_at);
+      const raceCtx={sid,rno,date:race.date,hasPreview,wind:prev?prev.wind_speed:null,tide,closed:race.closed_at};
+      const ranked=scoreBoats(boats,raceCtx);
+      const pk=makePicks(ranked);
+      const resultStr=`${pl[1]}-${pl[2]}-${pl[3]}`;
+      const hit=pk.combos.includes(resultStr);
+      let payoff=0;
+      if(hit && result.payouts && result.payouts.trifecta){
+        const t=result.payouts.trifecta.find(x=>x.combination===resultStr);
+        payoff=t?t.amount:0;
+      }
+
+      aT++; aI+=600; if(hit){aH++; aR+=payoff;}
+      if(!statBySt[sid]) statBySt[sid]={t:0,h:0,i:0,r:0};
+      statBySt[sid].t++; statBySt[sid].i+=600; if(hit){statBySt[sid].h++; statBySt[sid].r+=payoff;}
+
+      out.push({
+        sid, stadium:SNAME[sid], rno, hasPreview, model:MODEL_VER,
+        top3:[ranked[0].no,ranked[1].no,ranked[2].no], combos:pk.combos,
+        tide:tide?tide.label:null, result:resultStr, hit, payoff,
+        snapshot:ranked.map(b=>({no:b.no,course:b.course,pct:b.pct,exTime:b.exTime,st:(b.st!=null?b.st:b.avgST),motor2:b.motor2,local2:b.local2,cls:b.cls}))
+      });
     }
-
-    aT++; aI+=600; if(hit){aH++; aR+=payoff;}
-    if(!statBySt[sid]) statBySt[sid]={t:0,h:0,i:0,r:0};
-    statBySt[sid].t++; statBySt[sid].i+=600; if(hit){statBySt[sid].h++; statBySt[sid].r+=payoff;}
-
-    out.push({
-      sid, stadium:SNAME[sid], rno, hasPreview, model:MODEL_VER,
-      top3:[ranked[0].no,ranked[1].no,ranked[2].no], combos:pk.combos,
-      tide:tide?tide.label:null, result, hit, payoff,
-      snapshot:ranked.map(b=>({no:b.no,course:b.course,pct:b.pct,exTime:b.exTime,st:(b.st!=null?b.st:b.avgST),motor2:b.motor2,local2:b.local2,cls:b.cls}))
-    });
   }
 
   console.log(`確定 ${aT}R  的中 ${aH}件(${aT?Math.round(aH/aT*100):0}%)  回収率 ${aI?Math.round(aR/aI*100):0}%`);
