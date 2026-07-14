@@ -34,6 +34,7 @@ const TIDE_HARBOR={
   21:{pc:40,hc:26,name:'脇田(芦屋)'},
   22:{pc:40,hc:21,name:'福岡'},
   23:{pc:41,hc:1,name:'唐津'},
+  24:{pc:42,hc:50,name:'大村'},
 };
 
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
@@ -41,16 +42,31 @@ function boatsToArray(boats){ return Array.isArray(boats)?boats:Object.values(bo
 function unwrapToday(json,key){ return (json.today&&json.today[key])||json[key]||[]; }
 function hhmmToMin(s){ const m=/(\d{1,2}):(\d{2})/.exec(s||''); return m?(+m[1]*60+ +m[2]):null; }
 
-async function fetchJson(url){ const r=await fetch(url); return r.json(); }
+// 15秒でタイムアウトさせる(夜間にtide736が遅い時、永遠に待たないため。2026-07-13の16分停滞の教訓)
+async function fetchJson(url){ const r=await fetch(url,{signal:AbortSignal.timeout(15000)}); return r.json(); }
 
-async function fetchTide(sid,date,closedAt){
-  const hb=TIDE_HARBOR[sid]; if(!hb) return null;
+// 潮位チャートは「場×日付」ごとに1回だけ取得してキャッシュする。
+// 以前はレースごとに取得していて同じデータを12回ずつ計144回もfetchし、夜間のAPI遅延と重なって実行が16分超になった。
+const tideChartCache={};
+async function getTideChart(sid,date){
+  const key=sid+'_'+date;
+  if(key in tideChartCache) return tideChartCache[key];
+  const hb=TIDE_HARBOR[sid]; if(!hb){ tideChartCache[key]=null; return null; }
   const [y,mo,d]=date.split('-').map(Number);
   const url=`${TIDE_BASE}?pc=${hb.pc}&hc=${hb.hc}&yr=${y}&mn=${mo}&dy=${d}&rg=day`;
   try{
     const j=await fetchJson(url);
     const day=j.tide&&j.tide.chart&&j.tide.chart[date];
-    const arr=day&&day.tide; if(!arr||!arr.length) return null;
+    const arr=day&&day.tide;
+    tideChartCache[key]=(arr&&arr.length)?{hb,arr}:null;
+  }catch(e){ console.error('潮位取得エラー', sid, e.message); tideChartCache[key]=null; }
+  return tideChartCache[key];
+}
+
+async function fetchTide(sid,date,closedAt){
+  const c=await getTideChart(sid,date); if(!c) return null;
+  try{
+    const hb=c.hb, arr=c.arr;
     const raceMin=hhmmToMin(closedAt&&closedAt.slice(11)) ?? 12*60;
     let now=arr[0],prev=arr[0],bestN=1e9,bestP=1e9;
     arr.forEach(s=>{
