@@ -139,8 +139,9 @@ const SONTAKU_ON=false;
 // v1=初期(コース24%重視) → v2=2026-07-07バックテスト最適化(展示28%/ST20%強化、8日858Rで回収77%→109%)
 const MODEL_VER='v2';
 
-const PROGRAMS_URL="https://boatraceopenapi.github.io/programs/v2/today.json";
-const PREVIEWS_URL="https://boatraceopenapi.github.io/previews/v2/today.json";
+// 2026-07-14: boatraceopenapiが出走表/直前情報/結果を1本にまとめた新API(v1)に移行。旧programs/v2・previews/v2は直前情報が空になる不具合が発生したため乗り換えた。
+const API_URL="https://boatraceopenapi.github.io/api/v1/today.json";
+const API_DATE_URL=d=>`https://boatraceopenapi.github.io/api/v1/${d.slice(0,4)}/${d.replace(/-/g,'')}.json`;
 
 // 海水場の潮位地点（tide736.net）。満ち=イン有利／引き=センター・まくり有利
 // pc=都道府県コード, hc=港コード。まず宮島(厳島)から。確認でき次第ほかの海水場も追加。
@@ -190,32 +191,44 @@ async function fetchTide(sid,date,closedAt){
   }catch(e){ console.error('tide',e); return null; }
 }
 
-let PROGRAMS=[], PREVIEWS=[];
+let PROGRAMS=[];
 
 /* ===== ユーティリティ ===== */
 const $=id=>document.getElementById(id);
 function setStatus(msg,cls){ const s=$('status'); s.textContent=msg; s.className='status'+(cls?' '+cls:''); }
 function boatsToArray(boats){ return Array.isArray(boats)?boats:Object.values(boats||{}); }
-// programs/previews APIが新形式{today:{...}}でも旧形式{programs:[...]}でも読めるようにする
-function unwrapToday(json,key){ return (json.today&&json.today[key])||json[key]||[]; }
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+// 新API(v1)は stadiums.{場}.races.{R} のネスト構造。従来のフラット配列(race_stadium_number等)に慣らす。
+function normalizePrograms(raw){
+  const stadiums=(raw.programs&&raw.programs.stadiums)||{};
+  const out=[];
+  Object.keys(stadiums).forEach(sidStr=>{
+    const sid=+sidStr, races=stadiums[sidStr].races||{};
+    Object.keys(races).forEach(rnoStr=>{
+      const race=races[rnoStr];
+      out.push({
+        race_stadium_number:sid, race_number:+rnoStr,
+        race_date:race.date, race_closed_at:race.closed_at,
+        race_title:race.title, race_subtitle:race.subtitle,
+        boats:race.racers, preview:race.preview, result:race.result
+      });
+    });
+  });
+  return out;
+}
 
 /* ===== データ取得 ===== */
 async function loadToday(){
   $('loadBtn').disabled=true;
   setStatus('取ってくるわ、ちょい待ってや…');
   try{
-    const [pg,pv]=await Promise.all([
-      fetch(PROGRAMS_URL).then(r=>r.json()),
-      fetch(PREVIEWS_URL).then(r=>r.json()).catch(()=>({previews:[]}))
-    ]);
-    // 2026-07-12: boatraceopenapiのprograms APIが {programs:[...]} から {today:{programs:[...]},yesterday:{...}} に変更された。新旧どちらでも動くようにする。
-    PROGRAMS=unwrapToday(pg,'programs');
-    PREVIEWS=unwrapToday(pv,'previews');
+    const raw=await fetch(API_URL).then(r=>r.json());
+    PROGRAMS=normalizePrograms(raw);
     if(!PROGRAMS.length){ setStatus('本日の出走表が見つからんかったわ。手入力使ってや。','err'); $('loadBtn').disabled=false; return; }
     buildStadiumSelect();
     $('pickArea').style.display='grid';
-    setStatus('取れたで！場とレース選んで予想したろか。'+(PREVIEWS.length?'':'（直前情報はまだ出てへんわ）'),'ok');
+    const hasAnyPreview=PROGRAMS.some(p=>boatsToArray(p.preview&&p.preview.racers).some(b=>b.exhibition_time!=null));
+    setStatus('取れたで！場とレース選んで予想したろか。'+(hasAnyPreview?'':'（直前情報はまだ出てへんわ）'),'ok');
   }catch(e){
     setStatus('取得しくじったわ：'+e.message+' / ネット繋がっとるか見てや。','err');
   }
@@ -236,8 +249,8 @@ function onStadiumChange(){
 async function refreshPreview(){
   setStatus('直前情報、取り直しとるわ…');
   try{
-    const pv=await fetch(PREVIEWS_URL+'?t='+Date.now()).then(r=>r.json());
-    PREVIEWS=unwrapToday(pv,'previews');
+    const raw=await fetch(API_URL+'?t='+Date.now()).then(r=>r.json());
+    PROGRAMS=normalizePrograms(raw);
     setStatus('直前情報、更新したで（'+new Date().toLocaleTimeString('ja-JP')+'）','ok');
     if($('result').dataset.active) runAuto();
   }catch(e){ setStatus('更新しくじったわ：'+e.message,'err'); }
@@ -248,33 +261,33 @@ async function runAuto(){
   const sid=+$('stadiumSel').value, rno=+$('raceSel').value;
   // 予想のたびに最新の直前情報(展示・ST)を取り直す
   setStatus('最新の直前情報を取ってくるわ…');
-  try{ const pv=await fetch(PREVIEWS_URL+'?t='+Date.now()).then(r=>r.json()); PREVIEWS=unwrapToday(pv,'previews'); }catch(e){}
+  try{ const raw=await fetch(API_URL+'?t='+Date.now()).then(r=>r.json()); PROGRAMS=normalizePrograms(raw); }catch(e){}
   const prog=PROGRAMS.find(p=>p.race_stadium_number===sid && p.race_number===rno);
   if(!prog){ setStatus('そのレース見当たらんわ。','err'); return; }
-  const prev=PREVIEWS.find(p=>p.race_stadium_number===sid && p.race_number===rno);
+  const prev=prog.preview;
 
   const pgBoats=boatsToArray(prog.boats);
-  const pvBoats=prev?boatsToArray(prev.boats):[];
-  const pvByNo={}; pvBoats.forEach(b=>pvByNo[b.racer_boat_number]=b);
+  const pvBoats=prev?boatsToArray(prev.racers):[];
+  const pvByNo={}; pvBoats.forEach(b=>pvByNo[b.entry_number]=b);
 
   const boats=pgBoats.map(b=>{
-    const pv=pvByNo[b.racer_boat_number]||{};
+    const pv=pvByNo[b.entry_number]||{};
     return {
-      no:b.racer_boat_number,
-      name:b.racer_name||('?'+b.racer_boat_number),
-      cls:CLASS_NUM[b.racer_class_number]||'B1',
-      ki:b.racer_branch_number??null,
-      local2:b.racer_local_top_2_percent??0,
-      national2:b.racer_national_top_2_percent??0,
-      motor2:b.racer_assigned_motor_top_2_percent??0,
-      flying:b.racer_flying_count??0,
-      avgST:b.racer_average_start_timing??null,
+      no:b.entry_number,
+      name:b.name||('?'+b.entry_number),
+      cls:CLASS_NUM[b.rank_number]||'B1',
+      ki:b.branch_number??null,
+      local2:b.local_top_2_percent??0,
+      national2:b.national_top_2_percent??0,
+      motor2:b.motor_top_2_percent??0,
+      flying:b.flying_count??0,
+      avgST:b.average_start_timing??null,
       // 直前情報
-      course:pv.racer_course_number||b.racer_boat_number,
-      exTime:pv.racer_exhibition_time??null,
-      st:pv.racer_start_timing??null,
-      tilt:pv.racer_tilt_adjustment??null,
-      weight:pv.racer_weight??null,
+      course:pv.course_number||b.entry_number,
+      exTime:pv.exhibition_time??null,
+      st:pv.start_timing??null,
+      tilt:pv.tilt_adjustment??null,
+      weight:pv.weight??null,
     };
   });
 
@@ -283,11 +296,11 @@ async function runAuto(){
     closed:prog.race_closed_at||'',
     date:prog.race_date||new Date().toISOString().slice(0,10), sid,
     stadium:SNAME[sid]||('場'+sid), rno,
-    wind:prev?prev.race_wind:prog.race_wind,
-    windDir:prev?prev.race_wind_direction_number:null,
-    wave:prev?prev.race_wave:null,
-    weather:prev?prev.race_weather_number:prog.race_weather_number,
-    hasPreview:!!prev && pvBoats.some(b=>b.racer_exhibition_time),
+    wind:prev?prev.wind_speed:null,
+    windDir:prev?prev.wind_direction_number:null,
+    wave:prev?prev.wave_height:null,
+    weather:prev?prev.weather_number:null,
+    hasPreview:!!prev && pvBoats.some(b=>b.exhibition_time!=null),
   };
 
   // 潮位（海水場のみ）
@@ -527,7 +540,6 @@ function applyExInput(){
 /* ===== 成績ログ ===== */
 let CURRENT=null;
 const LOG_KEY='kuroko_logs';
-const RESULTS_URL=d=>`https://boatraceopenapi.github.io/results/v3/${d.slice(0,4)}/${d.replace(/-/g,'')}.json`;
 
 let toastTimer=null;
 function toast(msg){
@@ -610,24 +622,27 @@ async function checkResults(){
   const dates=[...new Set(pending.map(l=>l.date))];
   const byDate={};
   await Promise.all(dates.map(async d=>{
-    try{ const j=await fetch(RESULTS_URL(d)+'?t='+Date.now()).then(r=>r.json()); byDate[d]=j.results||[]; }
+    try{ const j=await fetch(API_DATE_URL(d)+'?t='+Date.now()).then(r=>r.json()); byDate[d]=(j.programs&&j.programs.stadiums)||null; }
     catch(e){ byDate[d]=null; }
   }));
   let done=0,stillPending=0;
   logs.forEach(l=>{
     if(l.hit!==null||!l.sid) return;
-    const races=byDate[l.date];
-    if(!races){ stillPending++; return; }
-    const r=races.find(x=>x.stadium_number===l.sid && x.number===l.rno);
-    if(!r||!r.boats){ stillPending++; return; }
-    const placed={}; r.boats.forEach(b=>{ if(b.racer_place_number) placed[b.racer_place_number]=b.racer_boat_number; });
+    const stadiums=byDate[l.date];
+    if(!stadiums){ stillPending++; return; }
+    const st=stadiums[String(l.sid)];
+    const race=st&&st.races&&st.races[String(l.rno)];
+    const result=race&&race.result;
+    if(!result||!result.racers){ stillPending++; return; }
+    const racers=boatsToArray(result.racers);
+    const placed={}; racers.forEach(b=>{ if(b.place_number) placed[b.place_number]=b.entry_number; });
     if(!placed[1]||!placed[2]||!placed[3]){ stillPending++; return; }
     const actual=`${placed[1]}-${placed[2]}-${placed[3]}`;
     l.result=actual;
     l.hit=l.combos.includes(actual);
     let amt=0;
-    if(l.hit && r.payouts && r.payouts.trifecta){
-      const t=r.payouts.trifecta.find(x=>x.combination===actual);
+    if(l.hit && result.payouts && result.payouts.trifecta){
+      const t=result.payouts.trifecta.find(x=>x.combination===actual);
       amt=t?t.amount:0;
     }
     l.payoff=l.hit?amt:0;
