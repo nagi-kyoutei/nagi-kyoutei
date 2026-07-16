@@ -157,7 +157,8 @@ async function main(){
 
   for(const sidStr of Object.keys(stadiums)){
     const sid=+sidStr;
-    if(!TIDE_HARBOR[sid]) continue;
+    // 2026-07-16: 海水場18場限定をやめ、淡水6場も含めた全24場を対象に変更(田中の希望)。
+    // 淡水場はTIDE_HARBORに登録が無いのでfetchTideが自動でnullを返し、潮補正は従来通りかからない。
     const races=stadiums[sidStr].races||{};
 
     for(const rnoStr of Object.keys(races)){
