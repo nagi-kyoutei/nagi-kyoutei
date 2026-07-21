@@ -43,10 +43,25 @@ function hhmmToMin(s){ const m=/(\d{1,2}):(\d{2})/.exec(s||''); return m?(+m[1]*
 
 // 15秒でタイムアウトさせる(夜間にtide736が遅い時、永遠に待たないため。2026-07-13の16分停滞の教訓)
 async function fetchJson(url){ const r=await fetch(url,{signal:AbortSignal.timeout(15000)}); return r.json(); }
+function sleep(ms){ return new Promise(res=>setTimeout(res,ms)); }
+
+// 2026-07-20: tide736.netが日単位でまるごと無応答/失敗になる現象(7/14,17,18,19)への対策でリトライを追加。
+// 1回失敗しても即諦めず、3秒待って最大2回リトライする(Mac側カニの調査依頼)。
+async function fetchJsonWithRetry(url, retries=2, delayMs=3000){
+  let lastErr;
+  for(let i=0;i<=retries;i++){
+    try{ return await fetchJson(url); }
+    catch(e){ lastErr=e; if(i<retries){ await sleep(delayMs); } }
+  }
+  throw lastErr;
+}
 
 // 潮位チャートは「場×日付」ごとに1回だけ取得してキャッシュする。
 // 以前はレースごとに取得していて同じデータを12回ずつ計144回もfetchし、夜間のAPI遅延と重なって実行が16分超になった。
 const tideChartCache={};
+// 2026-07-20: リトライしても失敗した「場×日付」を記録する。淡水場(TIDE_HARBOR未登録)の「もともと潮なし」と、
+// 海水場なのに取得失敗した「本当の障害」を区別できるようにする(Mac側カニの調査依頼)。
+const tideFailedKeys=new Set();
 async function getTideChart(sid,date){
   const key=sid+'_'+date;
   if(key in tideChartCache) return tideChartCache[key];
@@ -54,11 +69,15 @@ async function getTideChart(sid,date){
   const [y,mo,d]=date.split('-').map(Number);
   const url=`${TIDE_BASE}?pc=${hb.pc}&hc=${hb.hc}&yr=${y}&mn=${mo}&dy=${d}&rg=day`;
   try{
-    const j=await fetchJson(url);
+    const j=await fetchJsonWithRetry(url);
     const day=j.tide&&j.tide.chart&&j.tide.chart[date];
     const arr=day&&day.tide;
-    tideChartCache[key]=(arr&&arr.length)?{hb,arr}:null;
-  }catch(e){ console.error('潮位取得エラー', sid, e.message); tideChartCache[key]=null; }
+    if(arr&&arr.length){ tideChartCache[key]={hb,arr}; }
+    else { tideChartCache[key]=null; tideFailedKeys.add(key); console.error('潮位取得失敗(データ空)', sid, date); }
+  }catch(e){
+    console.error('潮位取得エラー(リトライ後も失敗)', sid, date, e.message);
+    tideChartCache[key]=null; tideFailedKeys.add(key);
+  }
   return tideChartCache[key];
 }
 
@@ -207,16 +226,22 @@ async function main(){
       if(!statBySt[sid]) statBySt[sid]={t:0,h:0,i:0,r:0};
       statBySt[sid].t++; statBySt[sid].i+=600; if(hit){statBySt[sid].h++; statBySt[sid].r+=payoff;}
 
+      // 潮位が無い理由が「淡水場でもともと対象外」か「海水場なのに取得失敗」かを区別する(2026-07-20、Mac側カニの調査依頼)。
+      const tideError = !tide && !!TIDE_HARBOR[sid] && tideFailedKeys.has(sid+'_'+race.date);
+
       out.push({
         sid, stadium:SNAME[sid], rno, hasPreview, model:MODEL_VER,
         top3:[ranked[0].no,ranked[1].no,ranked[2].no], combos:pk.combos,
-        tide:tide?tide.label:null, result:resultStr, hit, payoff,
+        tide:tide?tide.label:null, tideError: tideError||undefined, result:resultStr, hit, payoff,
         snapshot:ranked.map(b=>({no:b.no,course:b.course,pct:b.pct,exTime:b.exTime,st:(b.st!=null?b.st:b.avgST),motor2:b.motor2,local2:b.local2,cls:b.cls}))
       });
     }
   }
 
   console.log(`確定 ${aT}R  的中 ${aH}件(${aT?Math.round(aH/aT*100):0}%)  回収率 ${aI?Math.round(aR/aI*100):0}%`);
+  if(tideFailedKeys.size){
+    console.error(`⚠️潮位取得失敗(リトライ後も): ${[...tideFailedKeys].join(', ')}`);
+  }
   Object.keys(statBySt).forEach(sid=>{
     const s=statBySt[sid];
     console.log(`  ${SNAME[sid]} ${s.t}R 的中${Math.round(s.h/s.t*100)}% 回収${Math.round(s.r/s.i*100)}%`);
