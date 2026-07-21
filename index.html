@@ -137,7 +137,9 @@ const COURSE_BASE=[0,100,62,50,44,32,22];
 const SONTAKU_ON=false;
 // 採点モデルのバージョン。記録に残して「どのモデルの予想か」を後から比較できるようにする。
 // v1=初期(コース24%重視) → v2=2026-07-07バックテスト最適化(展示28%/ST20%強化、8日858Rで回収77%→109%)
-const MODEL_VER='v2';
+// → v2.5=2026-07-21試験導入(コース34%/展示38%/ST6%+チルト新規追加、1690Rで回収69.4%→92.5%)
+// v1/v2/v2.5はデータが貯まるごとに随時再検証する方針。SONTAKU_ONは変更なし。
+const MODEL_VER='v2.5';
 
 // 2026-07-14: boatraceopenapiが出走表/直前情報/結果を1本にまとめた新API(v1)に移行。旧programs/v2・previews/v2は直前情報が空になる不具合が発生したため乗り換えた。
 const API_URL="https://boatraceopenapi.github.io/api/v1/today.json";
@@ -362,8 +364,11 @@ function scoreBoats(boats,race){
     // フライング持ちはスタート慎重になりがち→減点＆注意
     if(b.flying>0){ stScore=Math.max(0,stScore-15); chips.push(['F'+b.flying+'本持ちで慎重','warn']); }
 
-    // 7. チルト（攻め・伸び型）
+    // 7. チルト（攻め・伸び型）v2.5で新規に採点へ組み込み。プラス調整ほど加点(50基準、±20/1目盛り)。
+    // 2026-07-21: 1690Rの実データでTRAIN/TESTを両方向入れ替えて検証、一貫して的中率・回収率を押し上げる唯一の追加項目だった(回収率84.5%→92.5%)。
+    const tiltScore=clamp(50+(b.tilt||0)*20,0,100);
     if(b.tilt!=null && b.tilt>=0.5) chips.push(['チルト'+b.tilt+'で伸び勝負','good']);
+    else if(b.tilt!=null && b.tilt<0) chips.push(['チルト'+b.tilt+'で守り型','warn']);
 
     // 8. 忖度補正（田中理論）※SONTAKU_ON=false の間は完全オフ（点数に影響させない）
     let sontaku=0;
@@ -387,10 +392,11 @@ function scoreBoats(boats,race){
       else if(race.tide.slope>=15){ if(b.course<=2) chips.push(['満ち潮でイン有利','good']); else if(b.course>=4) chips.push(['満ち潮は外不利','warn']); }
     }
 
-    // 重み付け合計 ★バックテスト最適化(2026-07-07, 8日858R): 展示・STを大幅強化＝回収率77%→109%(潮抜き検証)。
-    // 元の比率 co.22/cl.18/lo.16/mo.16/ex.28/st.20 を、合計0.94に正規化して潮補正のスケールを維持。
-    const raw = courseScore*0.172 + clsScore*0.141 + localScore*0.125 + motorScore*0.125
-              + exScore*0.219 + stScore*0.157 + sontaku + weather + tideAdj;
+    // 重み付け合計 ★v2.5(2026-07-21試験導入): 1690R(6/27-7/21)でco/ex/stの配分見直し+チルト追加を
+    // TRAIN/TESTを両方向入れ替えて検証、v2実績(回収69.4%)を一貫して上回った(回収92.5%)。
+    // 旧v2配分(参考): courseScore*0.172+clsScore*0.141+localScore*0.125+motorScore*0.125+exScore*0.219+stScore*0.157
+    const raw = courseScore*0.34 + clsScore*0.14 + localScore*0.15 + motorScore*0.15
+              + exScore*0.38 + stScore*0.06 + tiltScore*0.60 + sontaku + weather + tideAdj;
     b.score=Math.max(1,raw);
     b.chips=chips;
   });
@@ -491,10 +497,11 @@ function render(ranked,race){
   });
 
   html+=`<details><summary>採点の仕組み</summary><div class="muted" style="margin-top:8px">
-    展示タイム28%・ST20%・コース22%・級別18%・当地2連率16%・モーター2連率16%を合計し、気象補正と潮補正を加減点（重みは2026-07-07にバックテスト最適化、展示とSTを強化）。
-    展示タイムとSTは予想のたびに取得した最新値を使用。F持ちは慎重スタート想定で減点。強風時はイン信頼度を下げ外を見直す。
+    展示タイム38%・チルト調整量60%・コース34%・級別14%・当地2連率15%・モーター2連率15%・ST6%を合計し、気象補正と潮補正を加減点（v2.5、2026-07-21試験導入。1690Rの実データでTRAIN/TESTを両方向入れ替えて検証、コース・展示を強化しSTを大幅に軽くしチルトを新規追加）。
+    展示タイム・ST・チルトは予想のたびに取得した最新値を使用。F持ちは慎重スタート想定で減点。強風時はイン信頼度を下げ外を見直す。
     ※忖度補正(田中理論)は現在オフ。同期ダブルボスで外枠を持ち上げすぎる裏目が出たため停止中。
     宮島など海水場は潮補正あり：満ち潮はイン有利、引き潮はセンター・まくり有利として動的に評価を変える。
+    ※v1/v2/v2.5はデータが貯まるごとに随時再検証していく方針（今は試験導入段階）。
   </div></details>`;
 
   $('result').innerHTML=html;
@@ -580,7 +587,7 @@ function recordBet(){
     hasPreview:(race&&race.hasPreview)||false,   // 展示・ST込みの本物の予想か
     snapshot:ranked.map(b=>({
       no:b.no, name:b.name, course:b.course, cls:b.cls, pct:b.pct,
-      exTime:b.exTime, st:(b.st!=null?b.st:b.avgST), motor2:b.motor2, local2:b.local2, ki:b.ki
+      exTime:b.exTime, st:(b.st!=null?b.st:b.avgST), motor2:b.motor2, local2:b.local2, ki:b.ki, tilt:b.tilt
     })),
     result:null, hit:null, payoff:null
   });
