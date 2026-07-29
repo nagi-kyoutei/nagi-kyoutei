@@ -14,7 +14,13 @@ const SONTAKU_ON=false;
 // TRAIN/TESTを両方向入れ替えて検証(A→B・B→Aどちらもv2実績を大きく上回り一貫性を確認、回収率69.4%→92.5%)。
 // 全国率・ボート率・フライング回数・体重等も試したが片方向でしか効かず過学習と判断し不採用。
 // v1/v2との比較は継続する(データが貯まるごとに再検証)ため、MODEL_VERで記録を分けておく。
-const MODEL_VER='v2.5';
+//
+// 2026-07-29: v2.6を試験導入。3480R(6/27-7/28)で以下2点を両方向検証:
+// ①展示タイムを固定基準(6.60〜6.95秒)でなく「そのレース内での相対順位」に変更→A/B両方向で改善。
+// ②その上でチルトの重みを60%→10%に下げると、さらに両方向で改善(相対展示と情報が重複していたため)。
+// 「展示順位-モーター順位」等の追加案は計算ミスで一時的に有望に見えたが、修正後は効果なしと判明し不採用。
+// 全期間確定: v2.5(回収77.8%) → v2.6(回収88.4%、的中率は21.6%→17.6%に低下=回収率とのトレードオフ)。
+const MODEL_VER='v2.6';
 
 // 2026-07-14: boatraceopenapiが出走表/直前情報/結果を1本にまとめた新API(v1)に移行。旧programs/v2・previews/v2は直前情報が空になる不具合が発生したため乗り換えた。
 const API_URL="https://boatraceopenapi.github.io/api/v1/today.json";
@@ -107,6 +113,10 @@ function scoreBoats(boats,race){
   const bossKi=kis.length?Math.min(...kis):null;
   const strongWind=race.wind!=null && race.wind>=5;
 
+  // v2.6で新規追加。展示タイムを固定基準(6.60〜6.95秒)でなく「そのレース内での相対順位」で評価する。
+  // 日や水面ごとにタイムの出方が違うため、固定基準より相対順位の方がA/B両方向の検証で一貫して回収率が改善した。
+  const validEx=boats.map(b=>b.exTime).filter(t=>t!=null && t>0).sort((a,b)=>a-b);
+
   boats.forEach(b=>{
     const courseScore=COURSE_BASE[b.course]||30;
     const clsScore=CLASS_PT[b.cls]??45;
@@ -114,13 +124,19 @@ function scoreBoats(boats,race){
     const motorScore=clamp(b.motor2,0,100);
 
     let exScore=50;
-    if(b.exTime){ exScore=clamp((6.95-b.exTime)/(6.95-6.60)*100,0,100); }
+    if(validEx.length>=4 && b.exTime){
+      const rank=validEx.indexOf(b.exTime)+1; // 1=そのレースで最速
+      exScore=clamp((6-rank)/5*100,0,100);
+    } else if(b.exTime){
+      exScore=clamp((6.95-b.exTime)/(6.95-6.60)*100,0,100);
+    }
 
     let stScore=50; const stVal=(b.st!=null?b.st:b.avgST);
     if(stVal!=null){ stScore=clamp((0.20-stVal)/(0.20-0.05)*100,0,100); }
     if(b.flying>0){ stScore=Math.max(0,stScore-15); }
 
-    // v2.5で新規追加。チルト調整量(プラス=強気設定)が両方向の検証で一貫して的中率・回収率を押し上げた。
+    // v2.5で新規追加、v2.6で重みを60%→10%に縮小。相対展示順位と情報が重複するため、
+    // 重み60%のまま組み合わせるとA/B両方向で悪化することが判明した(2026-07-29検証)。
     const tiltScore=clamp(50+(b.tilt||0)*20,0,100);
 
     let sontaku=0;
@@ -138,10 +154,10 @@ function scoreBoats(boats,race){
       tideAdj = (b.course<=2) ? mag : -mag*0.8;
     }
 
-    // v2.5配分(2026-07-21試験導入): コース34%・級別14%・当地15%・モーター15%・展示38%・ST6%・チルト60%。
-    // 1690Rの実データで両方向検証済み(旧v2配分=courseScore*0.172+clsScore*0.141+localScore*0.125+motorScore*0.125+exScore*0.219+stScore*0.157)。
+    // v2.6配分(2026-07-29試験導入): コース34%・級別14%・当地15%・モーター15%・展示38%(相対順位)・ST6%・チルト10%。
+    // 3480Rの実データで両方向検証済み(v2.5=回収77.8% → v2.6=回収88.4%、的中率は21.6%→17.6%に低下)。
     const raw = courseScore*0.34 + clsScore*0.14 + localScore*0.15 + motorScore*0.15
-              + exScore*0.38 + stScore*0.06 + tiltScore*0.60 + sontaku + weather + tideAdj;
+              + exScore*0.38 + stScore*0.06 + tiltScore*0.10 + sontaku + weather + tideAdj;
     b.score=Math.max(1,raw);
   });
 
