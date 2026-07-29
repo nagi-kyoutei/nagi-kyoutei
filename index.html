@@ -138,8 +138,9 @@ const SONTAKU_ON=false;
 // 採点モデルのバージョン。記録に残して「どのモデルの予想か」を後から比較できるようにする。
 // v1=初期(コース24%重視) → v2=2026-07-07バックテスト最適化(展示28%/ST20%強化、8日858Rで回収77%→109%)
 // → v2.5=2026-07-21試験導入(コース34%/展示38%/ST6%+チルト新規追加、1690Rで回収69.4%→92.5%)
-// v1/v2/v2.5はデータが貯まるごとに随時再検証する方針。SONTAKU_ONは変更なし。
-const MODEL_VER='v2.5';
+// → v2.6=2026-07-29試験導入(展示を固定基準→レース内相対順位に変更+チルト60%→10%、3480Rで回収77.8%→88.4%)
+// v1/v2/v2.5/v2.6はデータが貯まるごとに随時再検証する方針。SONTAKU_ONは変更なし。
+const MODEL_VER='v2.6';
 
 // 2026-07-14: boatraceopenapiが出走表/直前情報/結果を1本にまとめた新API(v1)に移行。旧programs/v2・previews/v2は直前情報が空になる不具合が発生したため乗り換えた。
 const API_URL="https://boatraceopenapi.github.io/api/v1/today.json";
@@ -325,6 +326,9 @@ function scoreBoats(boats,race){
   const kis=boats.map(b=>b.ki).filter(v=>v!==null && v!==undefined);
   const bossKi=kis.length?Math.min(...kis):null;
   const strongWind=race.wind!=null && race.wind>=5;
+  // v2.6で新規追加。展示タイムを固定基準(6.60〜6.95秒)でなく「そのレース内での相対順位」で評価する。
+  // 日や水面ごとにタイムの出方が違うため、固定基準より相対順位の方がA/B両方向の検証で一貫して回収率が改善した(2026-07-29)。
+  const validEx=boats.map(b=>b.exTime).filter(t=>t!=null && t>0).sort((a,b)=>a-b);
 
   boats.forEach(b=>{
     const chips=[]; b.sontakuTxt='';
@@ -350,11 +354,18 @@ function scoreBoats(boats,race){
     if(b.motor2>=45) chips.push(['モーター好調'+b.motor2.toFixed(0)+'%','good']);
     else if(b.motor2>0 && b.motor2<32) chips.push(['モーター不調'+b.motor2.toFixed(0)+'%','warn']);
 
-    // 5. 展示タイム（小さいほど速い。6.60速い〜6.95遅い目安）
+    // 5. 展示タイム（v2.6: そのレース内での相対順位で評価。6艇分揃ってない時は固定基準にフォールバック）
     let exScore=50;
-    if(b.exTime){ exScore=clamp((6.95-b.exTime)/(6.95-6.60)*100,0,100);
+    if(validEx.length>=4 && b.exTime){
+      const exRank=validEx.indexOf(b.exTime)+1; // 1=そのレースで最速
+      exScore=clamp((6-exRank)/5*100,0,100);
+      if(exRank<=2) chips.push(['展示'+b.exTime+'(このレースで'+exRank+'位)','good']);
+      else if(exRank>=5) chips.push(['展示'+b.exTime+'(このレースで'+exRank+'位)','warn']);
+    } else if(b.exTime){
+      exScore=clamp((6.95-b.exTime)/(6.95-6.60)*100,0,100);
       if(b.exTime<=6.70) chips.push(['展示'+b.exTime+'で伸び良好','good']);
-      else if(b.exTime>=6.85) chips.push(['展示'+b.exTime+'は重い','warn']); }
+      else if(b.exTime>=6.85) chips.push(['展示'+b.exTime+'は重い','warn']);
+    }
 
     // 6. ST（直前ST優先→平均ST。小さいほど良い。0.05速い〜0.20遅い）
     let stScore=50; const stVal=(b.st!=null?b.st:b.avgST);
@@ -366,6 +377,7 @@ function scoreBoats(boats,race){
 
     // 7. チルト（攻め・伸び型）v2.5で新規に採点へ組み込み。プラス調整ほど加点(50基準、±20/1目盛り)。
     // 2026-07-21: 1690Rの実データでTRAIN/TESTを両方向入れ替えて検証、一貫して的中率・回収率を押し上げる唯一の追加項目だった(回収率84.5%→92.5%)。
+    // 2026-07-29(v2.6): 展示を相対順位化したところチルトと情報が重複していたと判明。重みを60%→10%に縮小(下の重み付け合計を参照)。
     const tiltScore=clamp(50+(b.tilt||0)*20,0,100);
     if(b.tilt!=null && b.tilt>=0.5) chips.push(['チルト'+b.tilt+'で伸び勝負','good']);
     else if(b.tilt!=null && b.tilt<0) chips.push(['チルト'+b.tilt+'で守り型','warn']);
@@ -392,11 +404,12 @@ function scoreBoats(boats,race){
       else if(race.tide.slope>=15){ if(b.course<=2) chips.push(['満ち潮でイン有利','good']); else if(b.course>=4) chips.push(['満ち潮は外不利','warn']); }
     }
 
-    // 重み付け合計 ★v2.5(2026-07-21試験導入): 1690R(6/27-7/21)でco/ex/stの配分見直し+チルト追加を
-    // TRAIN/TESTを両方向入れ替えて検証、v2実績(回収69.4%)を一貫して上回った(回収92.5%)。
+    // 重み付け合計 ★v2.6(2026-07-29試験導入): 3480R(6/27-7/28)で展示のレース内相対順位化+チルト60%→10%を
+    // TRAIN/TESTを両方向入れ替えて検証、v2.5実績(回収77.8%)を一貫して上回った(回収88.4%、的中率は21.6%→17.6%に低下)。
+    // 旧v2.5配分(参考): tiltScore*0.60(展示は固定基準6.60-6.95秒)
     // 旧v2配分(参考): courseScore*0.172+clsScore*0.141+localScore*0.125+motorScore*0.125+exScore*0.219+stScore*0.157
     const raw = courseScore*0.34 + clsScore*0.14 + localScore*0.15 + motorScore*0.15
-              + exScore*0.38 + stScore*0.06 + tiltScore*0.60 + sontaku + weather + tideAdj;
+              + exScore*0.38 + stScore*0.06 + tiltScore*0.10 + sontaku + weather + tideAdj;
     b.score=Math.max(1,raw);
     b.chips=chips;
   });
@@ -497,11 +510,11 @@ function render(ranked,race){
   });
 
   html+=`<details><summary>採点の仕組み</summary><div class="muted" style="margin-top:8px">
-    展示タイム38%・チルト調整量60%・コース34%・級別14%・当地2連率15%・モーター2連率15%・ST6%を合計し、気象補正と潮補正を加減点（v2.5、2026-07-21試験導入。1690Rの実データでTRAIN/TESTを両方向入れ替えて検証、コース・展示を強化しSTを大幅に軽くしチルトを新規追加）。
+    展示タイム38%（このレース内での相対順位で評価）・コース34%・級別14%・当地2連率15%・モーター2連率15%・ST6%・チルト調整量10%を合計し、気象補正と潮補正を加減点（v2.6、2026-07-29試験導入。3480Rの実データでTRAIN/TESTを両方向入れ替えて検証、展示を固定基準からレース内相対順位に変更しチルトの重みを縮小）。
     展示タイム・ST・チルトは予想のたびに取得した最新値を使用。F持ちは慎重スタート想定で減点。強風時はイン信頼度を下げ外を見直す。
     ※忖度補正(田中理論)は現在オフ。同期ダブルボスで外枠を持ち上げすぎる裏目が出たため停止中。
     宮島など海水場は潮補正あり：満ち潮はイン有利、引き潮はセンター・まくり有利として動的に評価を変える。
-    ※v1/v2/v2.5はデータが貯まるごとに随時再検証していく方針（今は試験導入段階）。
+    ※v1/v2/v2.5/v2.6はデータが貯まるごとに随時再検証していく方針（今は試験導入段階）。
   </div></details>`;
 
   $('result').innerHTML=html;
