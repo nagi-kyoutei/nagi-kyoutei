@@ -220,20 +220,50 @@ async function main(){
       const pvByNo={}; pvBoats.forEach(b=>pvByNo[b.entry_number]=b);
       const hasPreview=!!prev && pvBoats.some(b=>b.exhibition_time!=null);
 
+      // 2026-08-18 修正: 以前は course:(hasPreview&&pv.course_number)||b.entry_number という
+      // レース単位のhasPreviewフラグでガードしていたが、これだと「レース全体は直前情報あり」でも
+      // 「特定の1艇だけ欠場等でcourse_numberが無い」場合にその艇だけentry_numberへフォールバックし、
+      // 別の艇の本物のcourse_numberと衝突してcourseが重複するバグがあった(実例: 2026-06-27 津6R、
+      // 3号艇が欠場でcourse_number=undefined→entry_number=3にフォールバックした結果、本来course=3だった
+      // 4号艇と衝突)。艇ごとに「その艇自身のcourse_numberが有効かどうか」で判定するよう修正。
       const boats=boatsToArray(race.racers).map(b=>{
         const pv=pvByNo[b.entry_number]||{};
+        const validCourse = (pv.course_number!=null && pv.course_number>=1 && pv.course_number<=6);
         return {
           no:b.entry_number, name:b.name,
-          cls:CLASS_NUM[b.rank_number]||'B1', ki:b.branch_number,
-          local2:b.local_top_2_percent||0, national2:b.national_top_2_percent||0,
-          motor2:b.motor_top_2_percent||0, flying:b.flying_count||0,
+          regNo:b.number, // 選手登録番号
+          cls:CLASS_NUM[b.rank_number]||'B1', ki:b.branch_number, branch:b.branch_number_source,
+          age:b.age, weight:b.weight,
+          local2:b.local_top_2_percent||0, localWinRate:b.local_win_rate,
+          localTop3:b.local_top_3_percent,
+          national2:b.national_top_2_percent||0, nationalWinRate:b.national_win_rate,
+          nationalTop3:b.national_top_3_percent,
+          motor2:b.motor_top_2_percent||0, motorNo:b.motor_number, motorTop3:b.motor_top_3_percent,
+          boatNo:b.boat_number, boatTop2:b.boat_top_2_percent, boatTop3:b.boat_top_3_percent,
+          flying:b.flying_count||0, late:b.late_count||0,
           avgST:b.average_start_timing,
-          course:(hasPreview&&pv.course_number)||b.entry_number,
+          course:validCourse?pv.course_number:b.entry_number,
+          courseSource: validCourse ? 'preview' : 'fallback_entry_number', // 由来を明示(不明な推測を避けるため)
           exTime:(pv.exhibition_time&&pv.exhibition_time>0)?pv.exhibition_time:null,
           st:(hasPreview&&pv.start_timing!=null)?pv.start_timing:null,
           tilt:pv.tilt_adjustment
         };
       });
+
+      // 整合性チェック: courseの重複・艇番の重複・着順の重複を横断的に検出。
+      // 検出したら削除せず excludeFlag を立てて保持する(過去レースは残したいが、信頼できないと分かる形で)。
+      const courseVals=boats.map(b=>b.course);
+      const noVals=boats.map(b=>b.no);
+      const courseDup = new Set(courseVals).size !== courseVals.length;
+      const noDup = new Set(noVals).size !== noVals.length;
+      const allPlaces=Object.values(pl);
+      const placeDup = new Set(allPlaces).size !== allPlaces.length;
+      const excludeReasons=[];
+      if(courseDup) excludeReasons.push('course_duplicate');
+      if(noDup) excludeReasons.push('boat_no_duplicate');
+      if(placeDup) excludeReasons.push('place_duplicate');
+      const excludeFlag = excludeReasons.length>0;
+      if(excludeFlag){ console.error(`⚠️整合性エラー sid=${sid} R${rno}: ${excludeReasons.join(',')}`); }
 
       const tide=await fetchTide(sid,race.date,race.closed_at);
       const raceCtx={sid,rno,date:race.date,hasPreview,wind:prev?prev.wind_speed:null,tide,closed:race.closed_at};
@@ -241,11 +271,19 @@ async function main(){
       const pk=makePicks(ranked);
       const resultStr=`${pl[1]}-${pl[2]}-${pl[3]}`;
       const hit=pk.combos.includes(resultStr);
-      let payoff=0;
-      if(hit && result.payouts && result.payouts.trifecta){
-        const t=result.payouts.trifecta.find(x=>x.combination===resultStr);
+
+      // 2026-08-18 修正: 以前はpayoffを「自分の買い目(6点ボックス)が的中した時の3連単配当」のみ記録していたが、
+      // 任意の買い方を後からバックテストできるよう、全券種の確定配当を無条件で保存する仕様に変更。
+      const payouts = result.payouts || null;
+      let payoff=0; // 後方互換: 自分の買い目的中時の3連単配当(旧仕様のまま残す)
+      if(hit && payouts && payouts.trifecta){
+        const t=payouts.trifecta.find(x=>x.combination===resultStr);
         payoff=t?t.amount:0;
       }
+
+      // 全着順(1-6着)。以前はtop3までのresultStrしか保存していなかった。
+      const fullPlaces={};
+      boatsToArray(result.racers).forEach(b=>{ if(b.place_number) fullPlaces[b.place_number]=b.entry_number; });
 
       aT++; aI+=600; if(hit){aH++; aR+=payoff;}
       if(!statBySt[sid]) statBySt[sid]={t:0,h:0,i:0,r:0};
@@ -258,7 +296,23 @@ async function main(){
         sid, stadium:SNAME[sid], rno, hasPreview, model:MODEL_VER,
         top3:[ranked[0].no,ranked[1].no,ranked[2].no], combos:pk.combos,
         tide:tide?tide.label:null, tideError: tideError||undefined, result:resultStr, hit, payoff,
-        snapshot:ranked.map(b=>({no:b.no,course:b.course,pct:b.pct,exTime:b.exTime,st:(b.st!=null?b.st:b.avgST),motor2:b.motor2,local2:b.local2,cls:b.cls,tilt:b.tilt}))
+        excludeFlag: excludeFlag||undefined, excludeReasons: excludeFlag?excludeReasons:undefined,
+        fullResult: fullPlaces, // {1:艇番,2:艇番,...,6:艇番}
+        technique: result.technique_number_source, // 決まり手
+        grade: race.grade_number_source, dayNumber: race.day_number,
+        weather: result.weather_number_source, airTemp: result.air_temperature, waterTemp: result.water_temperature,
+        windDir: result.wind_direction_number_source, windSpeed: result.wind_speed, waveHeight: result.wave_height,
+        payouts, // 全券種・全組み合わせの確定配当をそのまま保存
+        snapshot:ranked.map(b=>({
+          no:b.no, regNo:b.regNo, course:b.course, courseSource:b.courseSource, pct:b.pct,
+          exTime:b.exTime, st:(b.st!=null?b.st:b.avgST), avgST:b.avgST,
+          motor2:b.motor2, motorNo:b.motorNo, motorTop3:b.motorTop3,
+          boatNo:b.boatNo, boatTop2:b.boatTop2, boatTop3:b.boatTop3,
+          local2:b.local2, localWinRate:b.localWinRate, localTop3:b.localTop3,
+          national2:b.national2, nationalWinRate:b.nationalWinRate, nationalTop3:b.nationalTop3,
+          cls:b.cls, tilt:b.tilt, age:b.age, weight:b.weight, branch:b.branch,
+          flying:b.flying, late:b.late
+        }))
       });
     }
   }
